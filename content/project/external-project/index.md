@@ -1,11 +1,15 @@
 ---
-date: "2016-04-27T00:00:00Z"
-external_link: http://example.org
-image:
-  caption: Photo by Toa Heftiba on Unsplash
-  focal_point: Smart
-summary: An example of linking directly to an external project website using `external_link`.
+title: birtms
+summary: "**Work in progress:** R package for Bayesian item response theory modeling with visual model evaluastion."
 tags:
-- Demo
-title: External Project
+- R
+- Bayesian statistics
+date: "2021-03-19"
+
+# Optional external URL for project (replaces project detail page).
+external_link: https://github.com/Famondir/birtms
+image:
+  caption: Preview of Shiny-App for IRT model comparison
+  focal_point: Smart
 ---
+

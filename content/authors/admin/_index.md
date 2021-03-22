@@ -1,48 +1,43 @@
 ---
-bio: My research interests include distributed robotics, mobile computing and programmable
-  matter.
+bio: My research interests include higher education and Bayesian statistics.
 education:
   courses:
-  - course: PhD in Artificial Intelligence
-    institution: Stanford University
-    year: 2012
-  - course: MEng in Artificial Intelligence
-    institution: Massachusetts Institute of Technology
-    year: 2009
-  - course: BSc in Artificial Intelligence
-    institution: Massachusetts Institute of Technology
-    year: 2008
+  - course: PhD in Chemistry Education
+    institution: Humboldt-University of Berlin
+    year: work in progress
+  - course: MEd in Mathematics and Chemistry
+    institution: Humboldt-University of Berlin
+    year: 2016
+  - course: BA in Mathematics and Chemistry
+    institution: Humboldt-University of Berlin
+    year: 2015
 email: ""
 highlight_name: false
 interests:
-- Artificial Intelligence
-- Computational Linguistics
-- Information Retrieval
+- Data Science
+- Bayesian Statistics
+- (Higher) Education
 organizations:
-- name: Stanford University
-  url: https://www.stanford.edu/
-role: Professor of Artificial Intelligence
+- name: Humboldt-University of Berlin
+  url: https://www.hu-berlin.de/en?set_language=en
+role: Visiting Researcher
 social:
 - icon: envelope
   icon_pack: fas
-  link: /#contact
+  link: /contact
 - display:
     header: true
-  icon: twitter
-  icon_pack: fab
-  label: Follow me on Twitter
-  link: https://twitter.com/GeorgeCushen
-- icon: graduation-cap
-  icon_pack: fas
-  link: https://scholar.google.co.uk/citations?user=sIwtMXoAAAAJ
 - icon: github
   icon_pack: fab
-  link: https://github.com/gcushen
+  link: https://github.com/Famondir
 - icon: linkedin
   icon_pack: fab
-  link: https://www.linkedin.com/
+  link: https://www.linkedin.com/in/simon-sch%C3%A4fer-571965208/
+- icon: xing
+  icon_pack: fab
+  link: https://www.xing.com/profile/Simon_Schaefer123
 superuser: true
-title: Nelson Bighetti
+title: Simon Schäfer
 ---
 
-Simon Schäfer is a PhD student at Humboldt-University of Berlin. His research interests include higher education and Bayesian statistics. He develops a R package named birtms (Bayesian Item Response Theory Models using Stan) and builds on Paul Brükners package brms.
+I'm a PhD student at Humboldt-University of Berlin. My research interests include higher education and Bayesian statistics. I'm developing a R package named birtms for Bayesian item response theory modeling using Stan and builds on the package [brms](https://github.com/paul-buerkner/brms).
