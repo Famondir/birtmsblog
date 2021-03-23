@@ -69,18 +69,12 @@ Consent of the data subject is any freely given, specific, informed and unambigu
 
 Controller for the purposes of the General Data Protection Regulation (GDPR), other data protection laws applicable in Member states of the European Union and other provisions related to data protection is:
 
-Simon Schäfer
-
-Ottmar-Geschke-Str. 103
-
-12555 Berlin
-
-Germany
-
-Phone: +49176 70664484
-
-Email: schaefersd@gmail.com
-
+Simon Schäfer  
+Ottmar-Geschke-Str. 103  
+12555 Berlin  
+Germany  
+Phone: +49176 70664484  
+Email: schaefersd@gmail.com  
 Website: https://birtms.netlify.app/
 
 ## 3. Collection of general data and information
