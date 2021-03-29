@@ -9491,7 +9491,7 @@ div.chart {
 }
 */
 .wg-hero.dark .hero-title {
-  text-shadow: 0 0 5px #000000, 0 0 5px #000000, 2px 0 0 #000, 0 -1px 0 #000, 0 1px 0 #000, -1px 0 0 #000; }
+  text-shadow: 0 0 5px #000000, 0 0 5px #000000, 1px 0 0 #000, 0 -1px 0 #000, 0 1px 0 #000, -1px 0 0 #000; }
 
 .wg-hero.dark .hero-lead {
   text-shadow: 0 0 3px #000000, 0 0 3px #000000, 1px 0 0 #000, 0 -1px 0 #000, 0 1px 0 #000, -1px 0 0 #000; }
