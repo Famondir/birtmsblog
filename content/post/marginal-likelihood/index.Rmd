@@ -4,8 +4,49 @@ author: "Simon Schäfer"
 date: 2021-03-22
 categories: ["R"]
 tags: ["Bayesian", "likelihood", "regression", "IRT"]
+bibliography: ['../biblio.bib']
+csl: '../apa.csl'
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(collapse = TRUE)
 ```
+
+**Note:** This is my blog's first post but the presented function was not the first coded function for this package. In fact there has been almost been half a year now since I started developing this package.
+
+## Summary
+
+In this post I will show you how the `marginal_likelihood` function was derived by the code presented by @Merkle.2019 for usage with models fitted with the **birtms** package. The code's performance has been improved and the range of item response theory (IRT) models it can be calculated for has been increased. Since a `birtmsfit` object is an extension of a `brmsfit` object you can use the code presented here for many latent variable models fitted with **brms** [@R-brms] after some slight adjustments.
+
+## Glance of theory
+
+### Comparing models
+
+When I came along the article comparing conditional and marginal likelihoods for latent variable models by @Merkle.2019 at the end of 2020 I already fit a bunch of IRT models with **brms**. And I used the Pareto-smoothed importance sampling (PSIS) leave-one-out cross validation criteria (LOO-CV) [@Vehtari.2017] to compare the model fit among those although I was aware that this criteria might lead to wrong decisions.
+
+How does LOO-CV work? In LOO-CV we remove a single response (or more precise: a single row of our long-format data set) and fit our model of interest. After that we check how good our model predicts the removed response. We repeat this for every response and end up with an estimation of how good our full model predicts new responses. Because fitting a model in a Bayesian takes considerably more time than with non-Bayesian methods fitting such a model again and again and again would take a huge amount of time.
+
+Let's look at two examples: If you fit a three parametric testlet model [@Wainer.2007] with around 100 persons with 270 responses each this might take three days - for a single run. To calculate the expected log pointwise predictive density (elpd) via exact LOO-CV you would have to fit this model 27.000 times. It would take round about 222 years! Fitting the (way simpler) Rasch model to the same data still takes 20 minutes for a single run - thus resulting in a computation time of one xear for the exact loo elpd. No can do that.
+
+Fortunately @Vehtari.2017 found a way to efficiantly estimate the loo elpd via Paretho-smoothing using the posterior samples of our Bayesian models. This way we get a robust estimate of the loo elpd at the cost of some minutes computation time in most cases. I was willing to spend this amount of time to get the state-of-the-art estimate for models' predictive error - which is superior to AIC, DIC and even WAIC [@Vehtari.2017]. One super cool feature of PSIS LOO-CV is: it gives you a parameter (called Pareto `k`) that warns you if your model is to flexible^[This hinted me a missspecification in my testlet models: you can't estimate a persons skill for a testlet with a single item in it.].
+
+But of course this method has some limitations as well. And one of them strikes us when we fit latent variable (or hierarchical) models: With LOO-CV we remove just a single response at a time. But these responses aren't independent from eachother because they all are related to one person (or cluster). Thus we might get an overoptimistic elpd value because it should be easier to predict a response based on the other responses a person gave compared to predict it by the other persons responses. So we would have to remove all the answers of a person at a time to get an unbiased estimate. @Vehtari.2017 state that - in theory - it is possible to do importance-sampling in this cases - but the more responses are related to a single person the more likely this method will result in a bad elpd estimate. Therefore they recommend using k-fold cross validation instead of LOO-CV in these cases, because this it is possible to partition the data accounting for the hierarchical structure [@Vehtari.16.12.2020].
+
+Let's see if k-fold cross validation is a method we could use instead of PSIS LOO-CV in daily work. If we remove all the responses of $\frac{1}{10}$th of the persons in our dataset, fit the model and calculate the predictive error and repeat this 10 times we get a robust estimate for the elpd. This will take about three hours for our Rasch model and a month for the 3pl testlet model. The former can be done over night - the latter not. And if we don't remove $\frac{1}{10}$th of the persons (and their responses) but only one persons responses at a time we have to fit the model as many times as persons contributed responses to our dataset. Theirfore this will take even longer. Maybe we just should stick to the simpler models? Or being more patient? Or get better hardware? Or just use PSIS LOO-CV as long as it does not yield high Pareto `k`'s?
+
+I first decided to just use the PSIS LOO-CV criteria and hope that the worse elpd estimates won't lead to wrong decisions at model comparison. I mean - @burkner2020bayesian did so in his awesome vignette and in their case study @Vehtari.16.12.2020 found that the order of the models was preserved and only the elpd differences varied. But some weeks ago I found the article by @Merkle.2019 who tackle exactly this issue. Therefore I decided to work through the difference between conditional and marginal likelihoods and implement their approach for the **birtms** package.
+
+**Note:** Right now I have no case study results to present here comparing the decisions I would have made based on PSIS LOO-CV criteria using conditional vs marginal likelihood. But I will write another blog post on this question later. 
+
+### Types of likelihood
+
+@Merkle.2019 discuss the importance of the marginal likelihood for information criteria computation of latent variable models. They contrast the marginal likelihood with the conditional likelihood and argue: one should use the marginal likelihood if it's of interest how well the model predicts the responses of a new person. If it's of interest how well the model predicts additional responses of a already present person one should use the conditional likelihood. Thus in psychometric contexts we should use the marginal likelihood most of the time^[An exception might be the context of adaptive testing where we want to know when our model can predict future responses of a person well enough - or equivalently: when does the incorporation of new responses stop contributing to our model's predictive precision - so we can stop the measurement.].
+
+One important information for me was: they don't talk about the marginal likelihood as used for Bayes factor computation (which might come to your mind first if you worked in Bayesian modeling for some time). They talk about the marginal likelihood as it is commonly used in (frequentist) IRT modeling.
+
+If we use the **brms** package to fit models we find a function called `brms::log_lik()`. This function will calculate the pointwise log-likelihood. Thus it is calculated by taking the logarithm of the conditional likelihood. Theirfore the `brms::waic()` and `brms::loo()` functions will result in information criteria based on the conditional likelihood^[They calculate the pointwise log-likelihood and then call the corresponding functions in the **loo** package [@Vehtari2020-wk].].
+
+## References
+
+
+

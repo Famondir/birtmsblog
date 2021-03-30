@@ -4,8 +4,69 @@ author: "Simon Schäfer"
 date: 2021-03-22
 categories: ["R"]
 tags: ["Bayesian", "likelihood", "regression", "IRT"]
+bibliography: ['../biblio.bib']
+csl: '../apa.csl'
 ---
 
 <script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
 
 
+<p><strong>Note:</strong> This is my blog’s first post but the presented function was not the first coded function for this package. In fact there has been almost been half a year now since I started developing this package.</p>
+<div id="summary" class="section level2">
+<h2>Summary</h2>
+<p>In this post I will show you how the <code>marginal_likelihood</code> function was derived by the code presented by <span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> for usage with models fitted with the <strong>birtms</strong> package. The code’s performance has been improved and the range of item response theory (IRT) models it can be calculated for has been increased. Since a <code>birtmsfit</code> object is an extension of a <code>brmsfit</code> object you can use the code presented here for many latent variable models fitted with <strong>brms</strong> <span class="citation">(<a href="#ref-R-brms" role="doc-biblioref">Bürkner, 2020b</a>)</span> after some slight adjustments.</p>
+</div>
+<div id="glance-of-theory" class="section level2">
+<h2>Glance of theory</h2>
+<div id="comparing-models" class="section level3">
+<h3>Comparing models</h3>
+<p>When I came along the article comparing conditional and marginal likelihoods for latent variable models by <span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> at the end of 2020 I already fit a bunch of IRT models with <strong>brms</strong>. And I used the Pareto-smoothed importance sampling (PSIS) leave-one-out cross validation criteria (LOO-CV) <span class="citation">(<a href="#ref-Vehtari.2017" role="doc-biblioref">Vehtari et al., 2017</a>)</span> to compare the model fit among those although I was aware that this criteria might lead to wrong decisions.</p>
+<p>How does LOO-CV work? In LOO-CV we remove a single response (or more precise: a single row of our long-format data set) and fit our model of interest. After that we check how good our model predicts the removed response. We repeat this for every response and end up with an estimation of how good our full model predicts new responses. Because fitting a model in a Bayesian takes considerably more time than with non-Bayesian methods fitting such a model again and again and again would take a huge amount of time.</p>
+<p>Let’s look at two examples: If you fit a three parametric testlet model <span class="citation">(<a href="#ref-Wainer.2007" role="doc-biblioref">Wainer et al., 2007</a>)</span> with around 100 persons with 270 responses each this might take three days - for a single run. To calculate the expected log pointwise predictive density (elpd) via exact LOO-CV you would have to fit this model 27.000 times. It would take round about 222 years! Fitting the (way simpler) Rasch model to the same data still takes 20 minutes for a single run - thus resulting in a computation time of one xear for the exact loo elpd. No can do that.</p>
+<p>Fortunately <span class="citation"><a href="#ref-Vehtari.2017" role="doc-biblioref">Vehtari et al.</a> (<a href="#ref-Vehtari.2017" role="doc-biblioref">2017</a>)</span> found a way to efficiantly estimate the loo elpd via Paretho-smoothing using the posterior samples of our Bayesian models. This way we get a robust estimate of the loo elpd at the cost of some minutes computation time in most cases. I was willing to spend this amount of time to get the state-of-the-art estimate for models’ predictive error - which is superior to AIC, DIC and even WAIC <span class="citation">(<a href="#ref-Vehtari.2017" role="doc-biblioref">Vehtari et al., 2017</a>)</span>. One super cool feature of PSIS LOO-CV is: it gives you a parameter (called Pareto <code>k</code>) that warns you if your model is to flexible<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a>.</p>
+<p>But of course this method has some limitations as well. And one of them strikes us when we fit latent variable (or hierarchical) models: With LOO-CV we remove just a single response at a time. But these responses aren’t independent from eachother because they all are related to one person (or cluster). Thus we might get an overoptimistic elpd value because it should be easier to predict a response based on the other responses a person gave compared to predict it by the other persons responses. So we would have to remove all the answers of a person at a time to get an unbiased estimate. <span class="citation"><a href="#ref-Vehtari.2017" role="doc-biblioref">Vehtari et al.</a> (<a href="#ref-Vehtari.2017" role="doc-biblioref">2017</a>)</span> state that - in theory - it is possible to do importance-sampling in this cases - but the more responses are related to a single person the more likely this method will result in a bad elpd estimate. Therefore they recommend using k-fold cross validation instead of LOO-CV in these cases, because this it is possible to partition the data accounting for the hierarchical structure <span class="citation">(<a href="#ref-Vehtari.16.12.2020" role="doc-biblioref">Vehtari, 16.12.2020</a>)</span>.</p>
+<p>Let’s see if k-fold cross validation is a method we could use instead of PSIS LOO-CV in daily work. If we remove all the responses of <span class="math inline">\(\frac{1}{10}\)</span>th of the persons in our dataset, fit the model and calculate the predictive error and repeat this 10 times we get a robust estimate for the elpd. This will take about three hours for our Rasch model and a month for the 3pl testlet model. The former can be done over night - the latter not. And if we don’t remove <span class="math inline">\(\frac{1}{10}\)</span>th of the persons (and their responses) but only one persons responses at a time we have to fit the model as many times as persons contributed responses to our dataset. Theirfore this will take even longer. Maybe we just should stick to the simpler models? Or being more patient? Or get better hardware? Or just use PSIS LOO-CV as long as it does not yield high Pareto <code>k</code>’s?</p>
+<p>I first decided to just use the PSIS LOO-CV criteria and hope that the worse elpd estimates won’t lead to wrong decisions at model comparison. I mean - <span class="citation"><a href="#ref-burkner2020bayesian" role="doc-biblioref">Bürkner</a> (<a href="#ref-burkner2020bayesian" role="doc-biblioref">2020a</a>)</span> did so in his awesome vignette and in their case study <span class="citation"><a href="#ref-Vehtari.16.12.2020" role="doc-biblioref">Vehtari</a> (<a href="#ref-Vehtari.16.12.2020" role="doc-biblioref">16.12.2020</a>)</span> found that the order of the models was preserved and only the elpd differences varied. But some weeks ago I found the article by <span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> who tackle exactly this issue. Therefore I decided to work through the difference between conditional and marginal likelihoods and implement their approach for the <strong>birtms</strong> package.</p>
+<p><strong>Note:</strong> Right now I have no case study results to present here comparing the decisions I would have made based on PSIS LOO-CV criteria using conditional vs marginal likelihood. But I will write another blog post on this question later.</p>
+</div>
+<div id="types-of-likelihood" class="section level3">
+<h3>Types of likelihood</h3>
+<p><span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> discuss the importance of the marginal likelihood for information criteria computation of latent variable models. They contrast the marginal likelihood with the conditional likelihood and argue: one should use the marginal likelihood if it’s of interest how well the model predicts the responses of a new person. If it’s of interest how well the model predicts additional responses of a already present person one should use the conditional likelihood. Thus in psychometric contexts we should use the marginal likelihood most of the time<a href="#fn2" class="footnote-ref" id="fnref2"><sup>2</sup></a>.</p>
+<p>One important information for me was: they don’t talk about the marginal likelihood as used for Bayes factor computation (which might come to your mind first if you worked in Bayesian modeling for some time). They talk about the marginal likelihood as it is commonly used in (frequentist) IRT modeling.</p>
+<p>If we use the <strong>brms</strong> package to fit models we find a function called <code>brms::log_lik()</code>. This function will calculate the pointwise log-likelihood. Thus it is calculated by taking the logarithm of the conditional likelihood. Theirfore the <code>brms::waic()</code> and <code>brms::loo()</code> functions will result in information criteria based on the conditional likelihood<a href="#fn3" class="footnote-ref" id="fnref3"><sup>3</sup></a>.</p>
+</div>
+</div>
+<div id="references" class="section level2 unnumbered">
+<h2>References</h2>
+<div id="refs" class="references csl-bib-body hanging-indent" line-spacing="2">
+<div id="ref-burkner2020bayesian" class="csl-entry">
+Bürkner, P.-C. (2020a). <em>Bayesian item response modeling in r with brms and stan</em>. <a href="http://arxiv.org/abs/1905.09501">http://arxiv.org/abs/1905.09501</a>
+</div>
+<div id="ref-R-brms" class="csl-entry">
+Bürkner, P.-C. (2020b). <em>Brms: Bayesian regression models using stan</em>. <a href="https://CRAN.R-project.org/package=brms">https://CRAN.R-project.org/package=brms</a>
+</div>
+<div id="ref-Merkle.2019" class="csl-entry">
+Merkle, E. C., Furr, D., &amp; Rabe-Hesketh, S. (2019). Bayesian comparison of latent variable models: Conditional versus marginal likelihoods. <em>Psychometrika</em>, <em>84</em>(3), 802–829. <a href="https://doi.org/10.1007/s11336-019-09679-0">https://doi.org/10.1007/s11336-019-09679-0</a>
+</div>
+<div id="ref-Vehtari.16.12.2020" class="csl-entry">
+Vehtari, A. (16.12.2020). <em>Cross-validation for hierarchical models</em>. <a href="https://avehtari.github.io/modelselection/rats_kcv.html">https://avehtari.github.io/modelselection/rats_kcv.html</a>
+</div>
+<div id="ref-Vehtari2020-wk" class="csl-entry">
+Vehtari, A., Gabry, J., Magnusson, M., Yao, Y., Bürkner, P.-C., Paananen, T., &amp; Gelman, A. (2020). <em>Loo: Efficient leave-one-out cross-validation and <span>WAIC</span> for bayesian models</em>. <a href="https://mc-stan.org/loo/">https://mc-stan.org/loo/</a>
+</div>
+<div id="ref-Vehtari.2017" class="csl-entry">
+Vehtari, A., Gelman, A., &amp; Gabry, J. (2017). Practical bayesian model evaluation using leave-one-out cross-validation and WAIC. <em>Statistics and Computing</em>, <em>27</em>(5), 1413–1432. <a href="https://doi.org/10.1007/s11222-016-9696-4">https://doi.org/10.1007/s11222-016-9696-4</a>
+</div>
+<div id="ref-Wainer.2007" class="csl-entry">
+Wainer, H., Bradlow, E. T., &amp; Wang, X. (2007). <em>Testlet response theory and its applications</em>. <span>Cambridge University Press</span>. <a href="https://doi.org/10.1017/CBO9780511618765">https://doi.org/10.1017/CBO9780511618765</a>
+</div>
+</div>
+</div>
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn1"><p>This hinted me a missspecification in my testlet models: you can’t estimate a persons skill for a testlet with a single item in it.<a href="#fnref1" class="footnote-back">↩︎</a></p></li>
+<li id="fn2"><p>An exception might be the context of adaptive testing where we want to know when our model can predict future responses of a person well enough - or equivalently: when does the incorporation of new responses stop contributing to our model’s predictive precision - so we can stop the measurement.<a href="#fnref2" class="footnote-back">↩︎</a></p></li>
+<li id="fn3"><p>They calculate the pointwise log-likelihood and then call the corresponding functions in the <strong>loo</strong> package <span class="citation">(<a href="#ref-Vehtari2020-wk" role="doc-biblioref">Vehtari et al., 2020</a>)</span>.<a href="#fnref3" class="footnote-back">↩︎</a></p></li>
+</ol>
+</div>

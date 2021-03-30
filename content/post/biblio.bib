@@ -1,0 +1,73 @@
+@article{Merkle.2019,
+ abstract = {Typical Bayesian methods for models with latent variables (or random effects) involve directly sampling the latent variables along with the model parameters. In high-level software code for model definitions (using, e.g., BUGS, JAGS, Stan), the likelihood is therefore specified as conditional on the latent variables. This can lead researchers to perform model comparisons via conditional likelihoods, where the latent variables are considered model parameters. In other settings, however, typical model comparisons involve marginal likelihoods where the latent variables are integrated out. This distinction is often overlooked despite the fact that it can have a large impact on the comparisons of interest. In this paper, we clarify and illustrate these issues, focusing on the comparison of conditional and marginal Deviance Information Criteria (DICs) and Watanabe-Akaike Information Criteria (WAICs) in psychometric modeling. The conditional/marginal distinction corresponds to whether the model should be predictive for the clusters that are in the data or for new clusters (where {\textquotedbl}clusters{\textquotedbl} typically correspond to higher-level units like people or schools). Correspondingly, we show that marginal WAIC corresponds to leave-one-cluster out cross-validation, whereas conditional WAIC corresponds to leave-one-unit out. These results lead to recommendations on the general application of the criteria to models with latent variables.},
+ author = {Merkle, Edgar C. and Furr, Daniel and Rabe-Hesketh, Sophia},
+ year = {2019},
+ title = {Bayesian Comparison of Latent Variable Models: Conditional Versus Marginal Likelihoods},
+ pages = {802--829},
+ volume = {84},
+ number = {3},
+ journal = {Psychometrika},
+ doi = {10.1007/s11336-019-09679-0},
+ file = {773ba249-9979-47af-ac93-9515b0e96c48:C\:\\Users\\Simon\\AppData\\Local\\Swiss Academic Software\\Citavi 6\\ProjectCache\\gpx0bdjkrqedh3cub1p6ii0z8cdi3kwx13dhyhzvh7vcg\\Citavi Attachments\\773ba249-9979-47af-ac93-9515b0e96c48.pdf:pdf}
+}
+
+@Manual{R-brms,
+  title = {brms: Bayesian Regression Models using Stan},
+  author = {Paul-Christian Bürkner},
+  year = {2020},
+  note = {R package version 2.14.4},
+  url = {https://CRAN.R-project.org/package=brms},
+}
+
+@Manual{Vehtari2020-wk,
+  title  = "loo: Efficient leave-one-out cross-validation and {WAIC} for
+            Bayesian models",
+  author = "Vehtari, Aki and Gabry, Jonah and Magnusson, Mans and Yao, Yuling
+            and B{\"u}rkner, Paul-Christian and Paananen, Topi and Gelman,
+            Andrew",
+  year   =  2020,
+  url    = "https://mc-stan.org/loo/"
+}
+
+@misc{Vehtari.16.12.2020,
+ author = {Vehtari, Aki},
+ year = {16.12.2020},
+ title = {Cross-validation for hierarchical models},
+ url = {https://avehtari.github.io/modelselection/rats_kcv.html},
+ urldate = {29.03.2021}
+}
+
+
+@article{Vehtari.2017,
+ author = {Vehtari, Aki and Gelman, Andrew and Gabry, Jonah},
+ year = {2017},
+ title = {Practical Bayesian model evaluation using leave-one-out cross-validation and WAIC},
+ pages = {1413--1432},
+ volume = {27},
+ number = {5},
+ issn = {0960-3174},
+ journal = {Statistics and Computing},
+ doi = {10.1007/s11222-016-9696-4}
+}
+
+@book{Wainer.2007,
+ abstract = {The measurement models employed to score tests have been evolving over the past century from those that focus on the entire test (true score theory) to models that focus on individual test items (item response theory) to models that use small groups of items (testlets) as the fungible unit from which tests are constructed and scored (testlet response theory, or TRT). In this book, the inventors of TRT trace the history of this evolution and explain the character of modern TRT. Written for researchers and professionals in statistics, psychometrics, and educational psychology, the first part offers an accessible introduction to TRT and its applications. The second part presents a comprehensive, self-contained discussion of the model couched within a fully Bayesian framework. Its parameters are estimated using Markov chain Monte Carlo procedures, and the resulting posterior distributions of the parameter estimates yield insights into score stability that were previously unsuspected},
+ author = {Wainer, Howard and Bradlow, Eric T. and Wang, Xiaohui},
+ year = {2007},
+ title = {Testlet response theory and its applications},
+ address = {Cambridge},
+ publisher = {{Cambridge University Press}},
+ isbn = {9780511618765},
+ doi = {10.1017/CBO9780511618765},
+ file = {http://zbmath.org/?q=an:1182.62211}
+}
+
+@misc{burkner2020bayesian,
+      title={Bayesian Item Response Modeling in R with brms and Stan},
+      author={Paul-Christian Bürkner},
+      year={2020},
+      eprint={1905.09501},
+      archivePrefix={arXiv},
+      primaryClass={stat.CO}
+}
+
