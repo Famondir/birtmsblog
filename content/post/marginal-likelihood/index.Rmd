@@ -94,7 +94,7 @@ mll_parallel <- function(stan_fit, data_list, MFUN, resid_name, sd_name, n_nodes
   library(statmod)       # For gauss.quad.prob()
   library(matrixStats)   # For logSumExp()
   
-  draws <- extract(stan_fit, stan_fit@model_pars)
+  draws <- rstan::extract(stan_fit, stan_fit@model_pars)
   n_iter <- ifelse(best_only, 0, nrow(draws$lp__))
   post_means <- better_posterior_means(stan_fit)
   
@@ -174,7 +174,7 @@ f_marginal <- function(node, r, iter, data_list, draws) {
 # structure as rstan::extract()
 # stan_fit: A fitted Stan model
 better_posterior_means <- function(stan_fit) {
-  draws <- extract(stan_fit, stan_fit@model_pars)
+  draws <- rstan::extract(stan_fit, stan_fit@model_pars)
   f <- function(x) {
     dims <- dim(x)
     n_dims <- length(dims)
@@ -196,10 +196,10 @@ library(rstan)
 library(doParallel)
 library(loo)
 library(tidyverse)
-options(mc.cores = 5)
-options(loo.cores = 5)
+options(mc.cores = 4)
+options(loo.cores = 4)
 
-aggression <- edstan::aggression %>% mutate(item = as.character(item))
+aggression <- edstan::aggression
 
 # Assemble example dataset; the considered model formula is
 #   ~ 1 + male + anger;
@@ -209,10 +209,10 @@ dl <- edstan::irt_data(y = aggression$dich, jj = aggression$person,
 
 # Fit model (or load fitted model)
 if (!file.exists('data/stan_fit.rds')) {
-  stan_fit <- rstan::stan("data/rasch_edstan_modified.stan", data = dl, iter = 500, chains = 5) # we draw more samples with one chain less
+  stan_fit <- rstan::stan("data/rasch_edstan_modified.stan", data = dl, iter = 2000, chains = 4) # we draw more samples with one chain less
   saveRDS(stan_fit, file = 'data/stan_fit.rds')
   
-  cl <- makeCluster(5)
+  cl <- makeCluster(4)
   registerDoParallel(cl)
   ll_marg <- mll_parallel(stan_fit, dl, f_marginal, "zeta", "sigma", 11)
   stopCluster(cl)
@@ -223,16 +223,23 @@ if (!file.exists('data/stan_fit.rds')) {
   ll_marg <- readRDS('data/ll_marg.rds')
 }
 
-loo_ll_marg <- loo::loo(ll_marg$ll)
+chain <- stan_fit %>% tidybayes::spread_draws(sigma) %>% pull(.chain)
+loo_ll_marg <- loo(ll_marg$ll, r_eff = relative_eff(ll_marg$ll, chain))
 
 print(loo_ll_marg)
 plot(loo_ll_marg)
 ```
 
-As we can see the likelihood was evaluated at around 300 points. These are related to the 316 persons who answered 24 items each. We find no Pareto `k` over `.5`. Actually we find some with negative value, which is fine. We should be concerned if we find values over `.7`. Next we will fit the model above twice with **brms**. First we fit the model with items as fixed effects which equals the model we fitted with **edstan** before. Second we fit the model with items as random effects which follows @burkner2020bayesian recommondations and will be equal to the models fit with **birtms**.
+As we can see the likelihood was evaluated at around 300 points. These are related to the 316 persons who answered 24 items each. We find no Pareto `k` over `.5`. Actually we find some with negative value, which is fine. We should be concerned if we find values over `.7`. In the next section we will fit the model above twice with **brms**.
+
+### Conditional likelihood with brms
+
+First we fit the model with items as fixed effects which equals the model we fitted with **edstan** before. Second we fit the model with items as random effects which follows @burkner2020bayesian recommondations and will be equal to the models fit with **birtms**.
 
 ```{r}
 library(brms)
+
+aggression <- aggression %>% mutate(item = as.character(item))
 
 formula_aggression_1pl_fixed <- bf(dich ~ 1 + item + (1 | person) + male + anger)
 formula_aggression_1pl_random <- bf(dich ~ 1 + (1 | item) + (1 | person) + male + anger)
@@ -253,7 +260,7 @@ if (!file.exists('data/fit_aggression_1pl_fixed.rds')) {
 } else {
   fit_aggression_1pl_fixed <- readRDS('data/fit_aggression_1pl_fixed.rds')
   
-  ll_cond_fixed <- readRDS('data/fit_aggression_1pl_fixed.rds')
+  # ll_cond_fixed <- readRDS('data/fit_aggression_1pl_fixed.rds')
 }
 
 if (!file.exists('data/fit_aggression_1pl_random.rds')) {
@@ -270,29 +277,355 @@ if (!file.exists('data/fit_aggression_1pl_random.rds')) {
 } else {
   fit_aggression_1pl_random <- readRDS('data/fit_aggression_1pl_random.rds')
   
-  ll_cond_random <- readRDS('data/fit_aggression_1pl_random.rds')
+  # ll_cond_random <- readRDS('data/fit_aggression_1pl_random.rds')
 }
 
 loo(fit_aggression_1pl_fixed, fit_aggression_1pl_random)
+plot(loo(fit_aggression_1pl_fixed))
 ```
 
-It took 19 s to compute each of the conditional likelihoods. 
-Conditional / pointwise log-likelihood in 22 seconds.
+As we see both approaches fit just as well and it took 19 s to compute each of the conditional likelihoods - instead of 158 s. Compared to the marginal loo we see that their elpd_loo is almost 200 lower - we migth tend to interpret this as: the **brms** models have better fitting. But we musn't compare the elpd by their value because the likelihoods types differ and have different length. Since the models are basicly the same we should wonder about this big elpd difference. My interpretation right now is: this might be linked to the finding in @Merkle.2019 that conditional likelihoods tend to support more complex models - but I'm not sure. Looking at the plot we see again that the conditional information criteria is based on the individual responses and not clustered by person resulting in many more blue crosses.
+
+### Marginal likelihood with brms
+
+```{r}
+
+MFUN0 <- function(node, r, iter, data_list2, draws2, linear_terms) {
+  resp_numbers <- data_list2[data_list2$person == unique(data_list2$person)[[r]],"resp_number"]
+
+  y <- data_list2$dich[resp_numbers]
+  base_term <- linear_terms[iter, resp_numbers] - draws2$theta[[iter, r]]
+
+  p <- brms::inv_logit_scaled(base_term + node)
+  sum(dbinom(y, 1, p, log = TRUE))
+}
+
+mll_parallel_brms1 <- function(fit, MFUN, n_nodes = 11, best_only = FALSE, cores = 4) {
+  
+  # ----- create a temporary logging file ----
+  tempDir <- tempfile()
+  dir.create(tempDir)
+  logFile <- file.path(tempDir, "log.txt")
+  viewer <- getOption("viewer")
+  viewer(logFile)
+  
+  # ----- initialise multiple workers ----
+  cl <- parallel::makeCluster(cores, outfile = logFile)
+  doParallel::registerDoParallel(cl)
+  on.exit(parallel::stopCluster(cl)) # terminate workes when finished
+  
+  # we get the dataset from the brms fit and add row and person numbers instead of passing it to the function
+  data_list2 <- fit$data %>% mutate(resp_number = row_number(),
+                                    person_number = as.numeric(factor(person, levels = unique(person))))
+
+  #browser()
+  
+  draws2 <- list(sd = tidybayes::spread_draws(fit, sd_person__Intercept) %>%
+                   rename(sd_person = sd_person__Intercept) %>%
+                   select(!starts_with('.')),
+                 theta = tidybayes::spread_draws(fit, r_person[person,]) %>%
+                   pivot_wider(values_from = r_person, names_from = person) %>%
+                   select(!starts_with('.'))
+                 )
+
+  n_iter2 <- nsamples(fit)
+
+  post_means2 <- map(draws2, ~matrix(colMeans(.), nrow = 1))
+
+  # Seperate out draws for residuals and their SD
+  resid2 <- ranef(fit)$person[,1,1]
+  stddev2 <- ranef(fit)$person[,2,1]
+
+  n_persons <- length(resid2)
+
+  # Get standard quadrature points
+  std_quad <- statmod::gauss.quad.prob(n_nodes, "normal", mu = 0, sigma = 1)
+  std_log_weights <- log(std_quad$weights)
+
+  linear_terms <- fitted(fit, scale = 'linear', summary = FALSE)
+  linear_terms_mean <- matrix(colMeans(linear_terms), nrow = 1)
+
+  # Extra iteration is to evaluate marginal log-likelihood at parameter means.
+  ll <- foreach::`%dopar%`(foreach::foreach(i = 1:(n_iter2 + 1), .combine = rbind, 
+                                            .packages = "matrixStats"
+                                            ),
+                           {
+                  my_options <- options(digits.secs = 3)
+                  on.exit(options(my_options))
+
+                  if(i %% 100 == 0 ) {
+                    print(paste(i, strptime(Sys.time(), "%Y-%m-%d %H:%M:%OS") ))
+                  }
+
+                  ll_j <- matrix(NA, nrow = 1, ncol = n_persons)
+
+                  for(j in 1:n_persons) {
+
+                    # Set up adaptive quadrature using SD for residuals either from draws or
+                    # posterior mean (for best_ll).
+                    sd_i <- ifelse(i <= n_iter2, draws2$sd$sd_person[[i]], post_means2$sd[[1]])
+                    adapt_nodes <- resid2[[j]] + stddev2[[j]] * std_quad$nodes
+                    log_weights <- log(sqrt(2*pi)) + log(stddev2[[j]]) + std_quad$nodes^2/2 +
+                      dnorm(adapt_nodes, sd = sd_i, log = TRUE) + std_log_weights
+
+                    # Evaluate mll with adaptive quadrature. If at n_iter + 1, evaluate
+                    # marginal likelihood at posterior means.
+                    if(i <= n_iter2) {
+
+                      loglik_by_node <- sapply(adapt_nodes, FUN = MFUN, r = j, iter = i,
+                                               data_list = data_list2, draws = draws2, linear_terms = linear_terms)
+
+                      weighted_loglik_by_node <- loglik_by_node + log_weights
+                      ll_j[1,j] <- matrixStats::logSumExp(weighted_loglik_by_node)
+                    } else {
+                      loglik_by_node <- sapply(adapt_nodes, FUN = MFUN, r = j, iter = 1,
+                                 data_list = data_list2, draws = post_means2, linear_terms = linear_terms_mean)
+                      
+                      weighted_loglik_by_node <- loglik_by_node + log_weights
+                      ll_j[1,j] <- matrixStats::logSumExp(weighted_loglik_by_node)
+                    }
+
+                  }
+
+                  ll_j
+
+                })
+  
+  if(best_only) {
+    return(ll[nrow(ll), ])
+  } else {
+    return(list(ll = ll[-nrow(ll), ], best_ll = ll[nrow(ll), ]))
+  }
+
+}
+
+MFUN1 <- function(node, r, iter, data_list2, draws2, linear_terms) {
+  resp_numbers <- data_list2$resp_number[data_list2$person_number == r]
+  y <- data_list2$dich[resp_numbers]
+  base_term <- linear_terms[iter, resp_numbers] - draws2$theta[[iter, r]]
+
+  p <- brms::inv_logit_scaled(base_term + node)
+  sum(dbinom(y, 1, p, log = TRUE))
+}
+
+# uses matrix objects instead of tibbles to store data
+mll_parallel_brms2 <- function(fit, MFUN, n_nodes = 11, best_only = FALSE, cores = 4) {
+
+  # ----- create a temporary logging file ----
+  tempDir <- tempfile()
+  dir.create(tempDir)
+  logFile <- file.path(tempDir, "log.txt")
+  viewer <- getOption("viewer")
+  viewer(logFile)
+  
+  # ----- initialise multiple workers ----
+  cl <- parallel::makeCluster(cores, outfile = logFile)
+  doParallel::registerDoParallel(cl)
+  on.exit(parallel::stopCluster(cl)) # terminate workes when finished
+  
+  # we get the dataset from the brms fit and add row and person numbers instead of passing it to the function
+  data_list2 <- fit$data %>% mutate(resp_number = row_number(),
+                                    person_number = as.numeric(factor(person, levels = unique(person))))
+
+  draws2 <- list(sd = tidybayes::spread_draws(fit, sd_person__Intercept) %>%
+                   rename(sd_person = sd_person__Intercept) %>%
+                   select(!starts_with('.')) %>% as.matrix(),
+                 theta = tidybayes::spread_draws(fit, r_person[person,]) %>%
+                   pivot_wider(values_from = r_person, names_from = person) %>%
+                   select(!starts_with('.')) %>% as.matrix()
+                 )
+
+  n_iter2 <- nsamples(fit)
+
+  post_means2 <- map(draws2, ~matrix(colMeans(.), nrow = 1))
+
+  # Seperate out draws for residuals and their SD
+  resid2 <- ranef(fit)$person[,1,1]
+  stddev2 <- ranef(fit)$person[,2,1]
+
+  n_persons <- length(resid2)
+
+  # Get standard quadrature points
+  std_quad <- statmod::gauss.quad.prob(n_nodes, "normal", mu = 0, sigma = 1)
+  std_log_weights <- log(std_quad$weights)
+
+  linear_terms <- fitted(fit, scale = 'linear', summary = FALSE)
+  linear_terms_mean <- matrix(colMeans(linear_terms), nrow = 1)
+
+  # Extra iteration is to evaluate marginal log-likelihood at parameter means.
+  ll <- foreach::`%dopar%`(foreach::foreach(i = 1:(n_iter2 + 1), .combine = rbind, 
+                                            .packages = "matrixStats"
+                                            ),
+                           {
+                  my_options <- options(digits.secs = 3)
+                  on.exit(options(my_options))
+
+                  if(i %% 100 == 0 ) {
+                    print(paste(i, strptime(Sys.time(), "%Y-%m-%d %H:%M:%OS") ))
+                  }
+
+                  ll_j <- matrix(NA, nrow = 1, ncol = n_persons)
+
+                  for(j in 1:n_persons) {
+
+                    # Set up adaptive quadrature using SD for residuals either from draws or
+                    # posterior mean (for best_ll).
+                    sd_i <- ifelse(i <= n_iter2, draws2$sd[[i]], post_means2$sd[[1]])
+                    adapt_nodes <- resid2[[j]] + stddev2[[j]] * std_quad$nodes
+                    log_weights <- log(sqrt(2*pi)) + log(stddev2[[j]]) + std_quad$nodes^2/2 +
+                      dnorm(adapt_nodes, sd = sd_i, log = TRUE) + std_log_weights
+
+                    # Evaluate mll with adaptive quadrature. If at n_iter + 1, evaluate
+                    # marginal likelihood at posterior means.
+                    if(i <= n_iter2) {
+
+                      loglik_by_node <- sapply(adapt_nodes, FUN = MFUN, r = j, iter = i,
+                                               data_list = data_list2, draws = draws2, linear_terms = linear_terms)
+
+                      weighted_loglik_by_node <- loglik_by_node + log_weights
+                      ll_j[1,j] <- matrixStats::logSumExp(weighted_loglik_by_node)
+                    } else {
+                      loglik_by_node <- sapply(adapt_nodes, FUN = MFUN, r = j, iter = 1,
+                                 data_list = data_list2, draws = post_means2, linear_terms = linear_terms_mean)
+                      
+                      weighted_loglik_by_node <- loglik_by_node + log_weights
+                      ll_j[1,j] <- matrixStats::logSumExp(weighted_loglik_by_node)
+                    }
+
+                  }
+
+                  ll_j
+
+                })
+  
+  if(best_only) {
+    return(ll[nrow(ll), ])
+  } else {
+    return(list(ll = ll[-nrow(ll), ], best_ll = ll[nrow(ll), ]))
+  }
+
+}
+
+MFUN2 <- function(node, r, iter, data_list2, draws2, linear_terms) {
+  resp_numbers <- data_list2$resp_number[data_list2$person_number == r]
+  y <- data_list2$dich[resp_numbers]
+  base_term <- linear_terms[iter, resp_numbers] - draws2$theta[[iter, r]]
+
+  p <- brms::inv_logit_scaled(base_term + node)
+  sum(dbinom(y, 1, p, log = TRUE))
+}
+
+# uses matrix objects instead of tibbles to store data and vectorisation to calculate loglikelihood
+mll_parallel_brms3 <- function(fit, MFUN, n_nodes = 11, best_only = FALSE, cores = 4) {
+
+  # ----- create a temporary logging file ----
+  tempDir <- tempfile()
+  dir.create(tempDir)
+  logFile <- file.path(tempDir, "log.txt")
+  viewer <- getOption("viewer")
+  viewer(logFile)
+  
+  # ----- initialise multiple workers ----
+  cl <- parallel::makeCluster(cores, outfile = logFile)
+  doParallel::registerDoParallel(cl)
+  on.exit(parallel::stopCluster(cl)) # terminate workes when finished
+  
+  # we get the dataset from the brms fit and add row and person numbers instead of passing it to the function
+  data_list2 <- fit$data %>% mutate(resp_number = row_number(),
+                                    person_number = as.numeric(factor(person, levels = unique(person))))
+
+  draws2 <- list(sd = tidybayes::spread_draws(fit, sd_person__Intercept) %>%
+                   rename(sd_person = sd_person__Intercept) %>%
+                   select(!starts_with('.')) %>% as.matrix(),
+                 theta = tidybayes::spread_draws(fit, r_person[person,]) %>%
+                   pivot_wider(values_from = r_person, names_from = person) %>%
+                   select(!starts_with('.')) %>% as.matrix()
+                 )
+
+  n_iter2 <- nsamples(fit)
+
+  post_means2 <- map(draws2, ~matrix(colMeans(.), nrow = 1))
+
+  # Seperate out draws for residuals and their SD
+  resid2 <- ranef(fit)$person[,1,1]
+  stddev2 <- ranef(fit)$person[,2,1]
+
+  n_persons <- length(resid2)
+
+  # Get standard quadrature points
+  std_quad <- statmod::gauss.quad.prob(n_nodes, "normal", mu = 0, sigma = 1)
+  std_log_weights <- log(std_quad$weights)
+
+  linear_terms <- fitted(fit, scale = 'linear', summary = FALSE)
+  linear_terms_mean <- matrix(colMeans(linear_terms), nrow = 1)
+
+  # Extra iteration is to evaluate marginal log-likelihood at parameter means.
+  ll <- foreach::`%dopar%`(foreach::foreach(i = 1:(n_iter2 + 1), .combine = rbind, 
+                                            .packages = "matrixStats"
+                                            ),
+                           {
+                  my_options <- options(digits.secs = 3)
+                  on.exit(options(my_options))
+
+                  if(i %% 100 == 0 ) {
+                    print(paste(i, strptime(Sys.time(), "%Y-%m-%d %H:%M:%OS") ))
+                  }
+
+                  ll_j <- matrix(NA, nrow = 1, ncol = n_persons)
+
+                  for(j in 1:n_persons) {
+
+                    # Set up adaptive quadrature using SD for residuals either from draws or
+                    # posterior mean (for best_ll).
+                    sd_i <- ifelse(i <= n_iter2, draws2$sd[[i]], post_means2$sd[[1]])
+                    adapt_nodes <- resid2[[j]] + stddev2[[j]] * std_quad$nodes
+                    log_weights <- log(sqrt(2*pi)) + log(stddev2[[j]]) + std_quad$nodes^2/2 +
+                      dnorm(adapt_nodes, sd = sd_i, log = TRUE) + std_log_weights
+
+                    # Evaluate mll with adaptive quadrature. If at n_iter + 1, evaluate
+                    # marginal likelihood at posterior means.
+                    if(i <= n_iter2) {
+                      loglik_by_node <- MFUN(adapt_nodes,  r = j, iter = i,
+                                              data_list = data_list2, draws = draws2, linear_terms = linear_terms)
+
+                      weighted_loglik_by_node <- loglik_by_node + log_weights
+                      ll_j[1,j] <- matrixStats::logSumExp(weighted_loglik_by_node)
+                    } else {
+                      loglik_by_node <- MFUN(adapt_nodes,  r = j, iter = 1,
+                                               data_list = data_list2, draws = post_means2, linear_terms = linear_terms_mean)
+                      weighted_loglik_by_node <- loglik_by_node + log_weights
+                      ll_j[1,j] <- matrixStats::logSumExp(weighted_loglik_by_node)
+                    }
+
+                  }
+
+                  ll_j
+
+                })
+  
+  if(best_only) {
+    return(ll[nrow(ll), ])
+  } else {
+    return(list(ll = ll[-nrow(ll), ], best_ll = ll[nrow(ll), ]))
+  }
+
+}
+
+MFUN3 <- function(node, r, iter, data_list2, draws2, linear_terms) {
+  resp_numbers <- data_list2$resp_number[data_list2$person_number == r]
+  y <- data_list2$dich[resp_numbers]
+  base_term <- linear_terms[iter, resp_numbers] - draws2$theta[[iter, r]]
+
+  p2 <- brms::inv_logit_scaled(matrix(rep(base_term, length(node)), nrow = length(node), byrow = TRUE) + node)
+  rowSums(dbinom(matrix(rep(y, length(node)), nrow = length(node), byrow = TRUE), 1, p2, log = TRUE))
+}
 
 ```
-Computed from 4000 by 7584 log-likelihood matrix
 
-         Estimate   SE
-elpd_loo  -3867.3 43.8
-p_loo       287.7  4.1
-looic      7734.7 87.6
-------
-Monte Carlo SE of elpd_loo is 0.3.
-
-All Pareto k estimates are good (k < 0.5).
-See help('pareto-k-diagnostic') for details.
-```
-
+MFUN0: 675 s
+MFUN1: 390 s
+MFUN2: 165 s
+MFUN3: 39 s
 
 ## References
 

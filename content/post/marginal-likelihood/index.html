@@ -6,6 +6,8 @@ categories: ["R"]
 tags: ["Bayesian", "likelihood", "regression", "IRT"]
 bibliography: ['../biblio.bib']
 csl: '../apa.csl'
+editor_options: 
+  chunk_output_type: inline
 ---
 
 <script src="{{< blogdown/postref >}}index_files/header-attrs/header-attrs.js"></script>
@@ -71,7 +73,7 @@ mll_parallel &lt;- function(stan_fit, data_list, MFUN, resid_name, sd_name, n_no
   library(statmod)       # For gauss.quad.prob()
   library(matrixStats)   # For logSumExp()
   
-  draws &lt;- extract(stan_fit, stan_fit@model_pars)
+  draws &lt;- rstan::extract(stan_fit, stan_fit@model_pars)
   n_iter &lt;- ifelse(best_only, 0, nrow(draws$lp__))
   post_means &lt;- better_posterior_means(stan_fit)
   
@@ -142,13 +144,14 @@ f_marginal &lt;- function(node, r, iter, data_list, draws) {
   p &lt;- boot::inv.logit(theta_fix + node - delta)
   sum(dbinom(y, 1, p, log = TRUE))
 }</code></pre>
-<p><em>General remarks:</em> The function <code>mll_parallel</code> uses parallel processing to speed up the calculation. That’s sweet. I didn’t knew about <strong>foreach</strong> package <span class="citation">(<a href="#ref-R-foreach" role="doc-biblioref">Microsoft &amp; Weston, 2020</a>)</span> before and was happy to learn some new tricks I might use in my upcoming package as well. On my machine the calculation of the marginal likelihood for the examplary unidimensional Rasch model takes about 50 seconds. But what we definetly don’t want are the <code>library()</code> calls inside of the function (just to get one or two functions of the packages). Instead we will work with the <code>::</code> operator<a href="#fn12" class="footnote-ref" id="fnref12"><sup>12</sup></a>, e.g. <code>matrixStats::logSumExp()</code>.</p>
+<p><em>General remarks:</em> The function <code>mll_parallel</code> uses parallel processing to speed up the calculation. That’s sweet. I didn’t knew about <strong>foreach</strong> package <span class="citation">(<a href="#ref-R-foreach" role="doc-biblioref">Microsoft &amp; Weston, 2020</a>)</span> before and was happy to learn some new tricks I might use in my upcoming package as well. On my machine the calculation of the marginal likelihood for the examplary unidimensional Rasch model takes about 158 seconds<a href="#fn12" class="footnote-ref" id="fnref12"><sup>12</sup></a>. But what we definetly don’t want are the <code>library()</code> calls inside of the function (just to get one or two functions of the packages). Instead we will work with the <code>::</code> operator<a href="#fn13" class="footnote-ref" id="fnref13"><sup>13</sup></a>, e.g. <code>matrixStats::logSumExp()</code>.</p>
 <p>In the next code block we will follow <span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> fitting the IRT model on the verbal aggression dataset with the <strong>edstan</strong> package and a customized Stan script. Next we calculate the marginal likelihood using the code above and finish with printing the LOO-CV statistics and a nice Pareto <code>k</code> plot. These will be used as reference for the functions coded for the use with <code>birtms</code> objects following beneath.</p>
 <pre class="r"><code>library(rstan)
 library(doParallel)
 library(loo)
-options(mc.cores = 5)
-options(loo.cores = 5)
+library(tidyverse)
+options(mc.cores = 4)
+options(loo.cores = 4)
 
 aggression &lt;- edstan::aggression
 
@@ -162,41 +165,40 @@ dl &lt;- edstan::irt_data(y = aggression$dich, jj = aggression$person,
 if (!file.exists(&#39;data/stan_fit.rds&#39;)) {
   stan_fit &lt;- rstan::stan(&quot;data/rasch_edstan_modified.stan&quot;, data = dl, iter = 2000, chains = 4) # we draw more samples with one chain less
   saveRDS(stan_fit, file = &#39;data/stan_fit.rds&#39;)
-} else {
-  stan_fit &lt;- readRDS(&#39;data/stan_fit.rds&#39;)
-}
-
-if (!file.exists(&#39;data/ll_marg.rds&#39;)) {
-  cl &lt;- makeCluster(5)
+  
+  cl &lt;- makeCluster(4)
   registerDoParallel(cl)
   ll_marg &lt;- mll_parallel(stan_fit, dl, f_marginal, &quot;zeta&quot;, &quot;sigma&quot;, 11)
   stopCluster(cl)
   saveRDS(ll_marg, file = &#39;data/ll_marg.rds&#39;)
 } else {
+  stan_fit &lt;- readRDS(&#39;data/stan_fit.rds&#39;)
+  
   ll_marg &lt;- readRDS(&#39;data/ll_marg.rds&#39;)
 }
 
-loo_ll_marg &lt;- loo::loo(ll_marg$ll)
-## Warning: Relative effective sample sizes (&#39;r_eff&#39; argument) not specified.
-## For models fit with MCMC, the reported PSIS effective sample sizes and 
-## MCSE estimates will be over-optimistic.
+chain &lt;- stan_fit %&gt;% tidybayes::spread_draws(sigma) %&gt;% pull(.chain)
+loo_ll_marg &lt;- loo(ll_marg$ll, r_eff = relative_eff(ll_marg$ll, chain))
 
 print(loo_ll_marg)
 ## 
-## Computed from 1250 by 316 log-likelihood matrix
+## Computed from 4000 by 316 log-likelihood matrix
 ## 
 ##          Estimate    SE
-## elpd_loo  -4057.5  64.5
-## p_loo        27.7   0.5
-## looic      8115.0 129.0
+## elpd_loo  -4057.4  64.4
+## p_loo        27.6   0.6
+## looic      8114.7 128.8
 ## ------
-## Monte Carlo SE of elpd_loo is 0.2.
+## Monte Carlo SE of elpd_loo is 0.1.
 ## 
 ## All Pareto k estimates are good (k &lt; 0.5).
 ## See help(&#39;pareto-k-diagnostic&#39;) for details.
 plot(loo_ll_marg)</code></pre>
 <p><img src="{{< blogdown/postref >}}index_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
-<p>As we can see the likelihood was evaluated at around 300 points. These are related to the 316 persons who answered 24 items each. We find no Pareto <code>k</code> over <code>.5</code>. Actually we find some with negative value, which is fine. We should be concerned if we find values over <code>.7</code>. Next we will fit the model above twice with <strong>brms</strong>. First we fit the model with items as fixed effects which equals the model we fitted with <strong>edstan</strong> before. Second we fit the model with items as random effects which follows <span class="citation"><a href="#ref-burkner2020bayesian" role="doc-biblioref">Bürkner</a> (<a href="#ref-burkner2020bayesian" role="doc-biblioref">2020a</a>)</span> recommondations and will be equal to the models fit with <strong>birtms</strong>. We will see that they both fit as well.</p>
+<p>As we can see the likelihood was evaluated at around 300 points. These are related to the 316 persons who answered 24 items each. We find no Pareto <code>k</code> over <code>.5</code>. Actually we find some with negative value, which is fine. We should be concerned if we find values over <code>.7</code>. In the next section we will fit the model above twice with <strong>brms</strong>.</p>
+<div id="conditional-likelihood-with-brms" class="section level3">
+<h3>Conditional likelihood with brms</h3>
+<p>First we fit the model with items as fixed effects which equals the model we fitted with <strong>edstan</strong> before. Second we fit the model with items as random effects which follows <span class="citation"><a href="#ref-burkner2020bayesian" role="doc-biblioref">Bürkner</a> (<a href="#ref-burkner2020bayesian" role="doc-biblioref">2020a</a>)</span> recommondations and will be equal to the models fit with <strong>birtms</strong>.</p>
 <pre class="r"><code>library(brms)
 ## Loading required package: Rcpp
 ## Loading &#39;brms&#39; package (version 2.14.4). Useful instructions
@@ -211,43 +213,298 @@ plot(loo_ll_marg)</code></pre>
 ## 
 ##     ar
 
+aggression &lt;- aggression %&gt;% mutate(item = as.character(item))
+
 formula_aggression_1pl_fixed &lt;- bf(dich ~ 1 + item + (1 | person) + male + anger)
 formula_aggression_1pl_random &lt;- bf(dich ~ 1 + (1 | item) + (1 | person) + male + anger)
 
 # Fit model (or load fitted model)
 if (!file.exists(&#39;data/fit_aggression_1pl_fixed.rds&#39;)) {
   fit_aggression_1pl_fixed &lt;- brm(
-  formula = formula_aggression_1pl_fixed,
-  data = aggression,
-  family = brmsfamily(&quot;bernoulli&quot;, &quot;logit&quot;),
-  file = &#39;data/fit_aggression_1pl_fixed.rds&#39;
-)
+    formula = formula_aggression_1pl_fixed,
+    data = aggression,
+    family = brmsfamily(&quot;bernoulli&quot;, &quot;logit&quot;),
+    file = &#39;data/fit_aggression_1pl_fixed.rds&#39;
+  )
+  fit_aggression_1pl_fixed &lt;- add_criterion(fit_aggression_1pl_fixed, &#39;loo&#39;) # does not save automatically for some reason
+  saveRDS(fit_aggression_1pl_fixed, file = &#39;data/fit_aggression_1pl_fixed.rds&#39;)
+   
+  # ll_cond_fixed &lt;- log_lik(fit_aggression_1pl_fixed)
+  # saveRDS(ll_cond_fixed, file = &#39;data/ll_cond_fixed.rds&#39;)
 } else {
   fit_aggression_1pl_fixed &lt;- readRDS(&#39;data/fit_aggression_1pl_fixed.rds&#39;)
+  
+  # ll_cond_fixed &lt;- readRDS(&#39;data/fit_aggression_1pl_fixed.rds&#39;)
 }
 
 if (!file.exists(&#39;data/fit_aggression_1pl_random.rds&#39;)) {
   fit_aggression_1pl_random &lt;- brm(
-  formula = formula_aggression_1pl_random,
-  data = aggression,
-  family = brmsfamily(&quot;bernoulli&quot;, &quot;logit&quot;),
-  file = &#39;data/fit_aggression_1pl_random.rds&#39;
-)
+    formula = formula_aggression_1pl_random,
+    data = aggression,
+    family = brmsfamily(&quot;bernoulli&quot;, &quot;logit&quot;),
+    file = &#39;data/fit_aggression_1pl_random.rds&#39;
+  )
+  fit_aggression_1pl_random &lt;- add_criterion(fit_aggression_1pl_random, &#39;loo&#39;)
+  
+  # ll_cond_random &lt;- log_lik(fit_aggression_1pl_random)
+  # saveRDS(ll_cond_random, file = &#39;data/ll_cond_random.rds&#39;)
 } else {
   fit_aggression_1pl_random &lt;- readRDS(&#39;data/fit_aggression_1pl_random.rds&#39;)
+  
+  # ll_cond_random &lt;- readRDS(&#39;data/fit_aggression_1pl_random.rds&#39;)
+}
+
+loo(fit_aggression_1pl_fixed, fit_aggression_1pl_random)
+## Output of model &#39;fit_aggression_1pl_fixed&#39;:
+## 
+## Computed from 4000 by 7584 log-likelihood matrix
+## 
+##          Estimate   SE
+## elpd_loo  -3868.4 44.3
+## p_loo       290.7  4.2
+## looic      7736.8 88.6
+## ------
+## Monte Carlo SE of elpd_loo is 0.2.
+## 
+## All Pareto k estimates are good (k &lt; 0.5).
+## See help(&#39;pareto-k-diagnostic&#39;) for details.
+## 
+## Output of model &#39;fit_aggression_1pl_random&#39;:
+## 
+## Computed from 4000 by 7584 log-likelihood matrix
+## 
+##          Estimate   SE
+## elpd_loo  -3868.0 43.8
+## p_loo       288.1  4.1
+## looic      7736.1 87.5
+## ------
+## Monte Carlo SE of elpd_loo is 0.2.
+## 
+## All Pareto k estimates are good (k &lt; 0.5).
+## See help(&#39;pareto-k-diagnostic&#39;) for details.
+## 
+## Model comparisons:
+##                           elpd_diff se_diff
+## fit_aggression_1pl_random  0.0       0.0   
+## fit_aggression_1pl_fixed  -0.4       0.8
+plot(loo(fit_aggression_1pl_fixed))</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p>As we see both approaches fit just as well and it took 19 s to compute each of the conditional likelihoods - instead of 158 s. Compared to the marginal loo we see that their elpd_loo is almost 200 lower - we migth tend to interpret this as: the <strong>brms</strong> models have better fitting. But we musn’t compare the elpd by their value because the likelihoods types differ and have different length. Since the models are basicly the same we should wonder about this big elpd difference. My interpretation right now is: this might be linked to the finding in <span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> that conditional likelihoods tend to support more complex models - but I’m not sure. Looking at the plot we see again that the conditional information criteria is based on the individual responses and not clustered by person resulting in many more blue crosses.</p>
+</div>
+<div id="marginal-likelihood-with-brms" class="section level3">
+<h3>Marginal likelihood with brms</h3>
+<pre class="r"><code># uses matrix objects instead of tibbles to store data and vectorisation to calculate loglikelihood
+mll_parallel_brms2 &lt;- function(fit, MFUN, n_nodes = 11, best_only = FALSE, cores = 4) {
+
+  # ----- create a temporary logging file ----
+  tempDir &lt;- tempfile()
+  dir.create(tempDir)
+  logFile &lt;- file.path(tempDir, &quot;log.txt&quot;)
+  viewer &lt;- getOption(&quot;viewer&quot;)
+  viewer(logFile)
+  
+  # ----- initialise multiple workers ----
+  cl &lt;- parallel::makeCluster(cores, outfile = logFile)
+  doParallel::registerDoParallel(cl)
+  on.exit(parallel::stopCluster(cl)) # terminate workes when finished
+  
+  # we get the dataset from the brms fit and add row and person numbers instead of passing it to the function
+  data_list2 &lt;- fit$data %&gt;% mutate(resp_number = row_number(),
+                                    person_number = as.numeric(factor(person, levels = unique(person))))
+
+  draws2 &lt;- list(sd = tidybayes::spread_draws(fit, sd_person__Intercept) %&gt;%
+                   rename(sd_person = sd_person__Intercept) %&gt;%
+                   select(!starts_with(&#39;.&#39;)) %&gt;% as.matrix(),
+                 theta = tidybayes::spread_draws(fit, r_person[person,]) %&gt;%
+                   pivot_wider(values_from = r_person, names_from = person) %&gt;%
+                   select(!starts_with(&#39;.&#39;)) %&gt;% as.matrix()
+                 )
+
+  n_iter2 &lt;- nsamples(fit)
+
+  post_means2 &lt;- map(draws2, ~matrix(colMeans(.), nrow = 1))
+
+  # Seperate out draws for residuals and their SD
+  resid2 &lt;- ranef(fit)$person[,1,1]
+  stddev2 &lt;- ranef(fit)$person[,2,1]
+
+  n_persons &lt;- length(resid2)
+
+  # Get standard quadrature points
+  std_quad &lt;- statmod::gauss.quad.prob(n_nodes, &quot;normal&quot;, mu = 0, sigma = 1)
+  std_log_weights &lt;- log(std_quad$weights)
+
+  linear_terms &lt;- fitted(fit, scale = &#39;linear&#39;, summary = FALSE)
+  linear_terms_mean &lt;- matrix(colMeans(linear_terms), nrow = 1)
+
+  # Extra iteration is to evaluate marginal log-likelihood at parameter means.
+  ll &lt;- foreach::`%dopar%`(foreach::foreach(i = 1:(n_iter2 + 1), .combine = rbind, 
+                                            .packages = &quot;matrixStats&quot;
+                                            ),
+                           {
+                  my_options &lt;- options(digits.secs = 3)
+                  on.exit(options(my_options))
+
+                  if(i %% 100 == 0 ) {
+                    print(paste(i, strptime(Sys.time(), &quot;%Y-%m-%d %H:%M:%OS&quot;) ))
+                  }
+
+                  ll_j &lt;- matrix(NA, nrow = 1, ncol = n_persons)
+
+                  for(j in 1:n_persons) {
+
+                    # Set up adaptive quadrature using SD for residuals either from draws or
+                    # posterior mean (for best_ll).
+                    sd_i &lt;- ifelse(i &lt;= n_iter2, draws2$sd[[i]], post_means2$sd[[1]])
+                    adapt_nodes &lt;- resid2[[j]] + stddev2[[j]] * std_quad$nodes
+                    log_weights &lt;- log(sqrt(2*pi)) + log(stddev2[[j]]) + std_quad$nodes^2/2 +
+                      dnorm(adapt_nodes, sd = sd_i, log = TRUE) + std_log_weights
+
+                    # Evaluate mll with adaptive quadrature. If at n_iter + 1, evaluate
+                    # marginal likelihood at posterior means.
+                    if(i &lt;= n_iter2) {
+
+                      loglik_by_node &lt;- sapply(adapt_nodes, FUN = MFUN, r = j, iter = i,
+                                               data_list = data_list2, draws = draws2, linear_terms = linear_terms)
+
+                      weighted_loglik_by_node &lt;- loglik_by_node + log_weights
+                      ll_j[1,j] &lt;- matrixStats::logSumExp(weighted_loglik_by_node)
+                    } else {
+                      loglik_by_node &lt;- sapply(adapt_nodes, FUN = MFUN, r = j, iter = 1,
+                                 data_list = data_list2, draws = post_means2, linear_terms = linear_terms_mean)
+                      
+                      weighted_loglik_by_node &lt;- loglik_by_node + log_weights
+                      ll_j[1,j] &lt;- matrixStats::logSumExp(weighted_loglik_by_node)
+                    }
+
+                  }
+
+                  ll_j
+
+                })
+  
+  if(best_only) {
+    return(ll[nrow(ll), ])
+  } else {
+    return(list(ll = ll[-nrow(ll), ], best_ll = ll[nrow(ll), ]))
+  }
+
+}
+
+MFUN2 &lt;- function(node, r, iter, data_list2, draws2, linear_terms) {
+  resp_numbers &lt;- data_list2$resp_number[data_list2$person_number == r]
+  y &lt;- data_list2$dich[resp_numbers]
+  base_term &lt;- linear_terms[iter, resp_numbers] - draws2$theta[[iter, r]]
+
+  p &lt;- brms::inv_logit_scaled(base_term + node)
+  sum(dbinom(y, 1, p, log = TRUE))
+}
+
+# uses matrix objects instead of tibbles to store data and vectorisation to calculate loglikelihood
+mll_parallel_brms3 &lt;- function(fit, MFUN, n_nodes = 11, best_only = FALSE, cores = 4) {
+
+  # ----- create a temporary logging file ----
+  tempDir &lt;- tempfile()
+  dir.create(tempDir)
+  logFile &lt;- file.path(tempDir, &quot;log.txt&quot;)
+  viewer &lt;- getOption(&quot;viewer&quot;)
+  viewer(logFile)
+  
+  # ----- initialise multiple workers ----
+  cl &lt;- parallel::makeCluster(cores, outfile = logFile)
+  doParallel::registerDoParallel(cl)
+  on.exit(parallel::stopCluster(cl)) # terminate workes when finished
+  
+  # we get the dataset from the brms fit and add row and person numbers instead of passing it to the function
+  data_list2 &lt;- fit$data %&gt;% mutate(resp_number = row_number(),
+                                    person_number = as.numeric(factor(person, levels = unique(person))))
+
+  draws2 &lt;- list(sd = tidybayes::spread_draws(fit, sd_person__Intercept) %&gt;%
+                   rename(sd_person = sd_person__Intercept) %&gt;%
+                   select(!starts_with(&#39;.&#39;)) %&gt;% as.matrix(),
+                 theta = tidybayes::spread_draws(fit, r_person[person,]) %&gt;%
+                   pivot_wider(values_from = r_person, names_from = person) %&gt;%
+                   select(!starts_with(&#39;.&#39;)) %&gt;% as.matrix()
+                 )
+
+  n_iter2 &lt;- nsamples(fit)
+
+  post_means2 &lt;- map(draws2, ~matrix(colMeans(.), nrow = 1))
+
+  # Seperate out draws for residuals and their SD
+  resid2 &lt;- ranef(fit)$person[,1,1]
+  stddev2 &lt;- ranef(fit)$person[,2,1]
+
+  n_persons &lt;- length(resid2)
+
+  # Get standard quadrature points
+  std_quad &lt;- statmod::gauss.quad.prob(n_nodes, &quot;normal&quot;, mu = 0, sigma = 1)
+  std_log_weights &lt;- log(std_quad$weights)
+
+  linear_terms &lt;- fitted(fit, scale = &#39;linear&#39;, summary = FALSE)
+  linear_terms_mean &lt;- matrix(colMeans(linear_terms), nrow = 1)
+
+  # Extra iteration is to evaluate marginal log-likelihood at parameter means.
+  ll &lt;- foreach::`%dopar%`(foreach::foreach(i = 1:(n_iter2 + 1), .combine = rbind, 
+                                            .packages = &quot;matrixStats&quot;
+                                            ),
+                           {
+                  my_options &lt;- options(digits.secs = 3)
+                  on.exit(options(my_options))
+
+                  if(i %% 100 == 0 ) {
+                    print(paste(i, strptime(Sys.time(), &quot;%Y-%m-%d %H:%M:%OS&quot;) ))
+                  }
+
+                  ll_j &lt;- matrix(NA, nrow = 1, ncol = n_persons)
+
+                  for(j in 1:n_persons) {
+
+                    # Set up adaptive quadrature using SD for residuals either from draws or
+                    # posterior mean (for best_ll).
+                    sd_i &lt;- ifelse(i &lt;= n_iter2, draws2$sd[[i]], post_means2$sd[[1]])
+                    adapt_nodes &lt;- resid2[[j]] + stddev2[[j]] * std_quad$nodes
+                    log_weights &lt;- log(sqrt(2*pi)) + log(stddev2[[j]]) + std_quad$nodes^2/2 +
+                      dnorm(adapt_nodes, sd = sd_i, log = TRUE) + std_log_weights
+
+                    # Evaluate mll with adaptive quadrature. If at n_iter + 1, evaluate
+                    # marginal likelihood at posterior means.
+                    if(i &lt;= n_iter2) {
+                      loglik_by_node &lt;- MFUN(adapt_nodes,  r = j, iter = i,
+                                              data_list = data_list2, draws = draws2, linear_terms = linear_terms)
+
+                      weighted_loglik_by_node &lt;- loglik_by_node + log_weights
+                      ll_j[1,j] &lt;- matrixStats::logSumExp(weighted_loglik_by_node)
+                    } else {
+                      loglik_by_node &lt;- MFUN(adapt_nodes,  r = j, iter = 1,
+                                               data_list = data_list2, draws = post_means2, linear_terms = linear_terms_mean)
+                      weighted_loglik_by_node &lt;- loglik_by_node + log_weights
+                      ll_j[1,j] &lt;- matrixStats::logSumExp(weighted_loglik_by_node)
+                    }
+
+                  }
+
+                  ll_j
+
+                })
+  
+  if(best_only) {
+    return(ll[nrow(ll), ])
+  } else {
+    return(list(ll = ll[-nrow(ll), ], best_ll = ll[nrow(ll), ]))
+  }
+
+}
+
+MFUN3 &lt;- function(node, r, iter, data_list2, draws2, linear_terms) {
+  resp_numbers &lt;- data_list2$resp_number[data_list2$person_number == r]
+  y &lt;- data_list2$dich[resp_numbers]
+  base_term &lt;- linear_terms[iter, resp_numbers] - draws2$theta[[iter, r]]
+
+  p2 &lt;- brms::inv_logit_scaled(matrix(rep(base_term, length(node)), nrow = length(node), byrow = TRUE) + node)
+  rowSums(dbinom(matrix(rep(y, length(node)), nrow = length(node), byrow = TRUE), 1, p2, log = TRUE))
 }</code></pre>
-<p>Conditional / pointwise log-likelihood in 22 seconds.</p>
-<pre><code>Computed from 4000 by 7584 log-likelihood matrix
-
-         Estimate   SE
-elpd_loo  -3867.3 43.8
-p_loo       287.7  4.1
-looic      7734.7 87.6
-------
-Monte Carlo SE of elpd_loo is 0.3.
-
-All Pareto k estimates are good (k &lt; 0.5).
-See help(&#39;pareto-k-diagnostic&#39;) for details.</code></pre>
+</div>
 </div>
 <div id="references" class="section level2 unnumbered">
 <h2>References</h2>
@@ -298,6 +555,7 @@ Wainer, H., Bradlow, E. T., &amp; Wang, X. (2007). <em>Testlet response theory a
 <li id="fn9"><p>They calculate the pointwise log-likelihood and then call the corresponding functions in the <strong>loo</strong> package <span class="citation">(<a href="#ref-Vehtari2020-wk" role="doc-biblioref">Vehtari et al., 2020</a>)</span>.<a href="#fnref9" class="footnote-back">↩︎</a></p></li>
 <li id="fn10"><p>They substract the fixed effect person covariates from the theta variable - thus their zeta vector should be centered close to zero.<a href="#fnref10" class="footnote-back">↩︎</a></p></li>
 <li id="fn11"><p>Although I have to admit that there are some special cases where I don’t find a way to specify all restrictions I want to make for my model within <strong>brms</strong> syntax (efficiently) and therefore will pass some custom Stan code. One limit I recently found was latent variable modeling as you can do in a SEM but I hope that this feature will come with version 3 - I realy hope you get the founding for the extension of your awesome package, Paul. 😉<a href="#fnref11" class="footnote-back">↩︎</a></p></li>
-<li id="fn12"><p>If you don’t want to use <code>::</code> you should use <code>require</code> instead of <code>library</code> inside a function.<a href="#fnref12" class="footnote-back">↩︎</a></p></li>
+<li id="fn12"><p>Notice that I used longer chains. To fit the 500 iterations in five chains as described in <span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> my machine took about 50 seconds.<a href="#fnref12" class="footnote-back">↩︎</a></p></li>
+<li id="fn13"><p>If you don’t want to use <code>::</code> you should use <code>require</code> instead of <code>library</code> inside a function.<a href="#fnref13" class="footnote-back">↩︎</a></p></li>
 </ol>
 </div>
