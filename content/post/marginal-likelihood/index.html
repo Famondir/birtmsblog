@@ -25,16 +25,229 @@ csl: '../apa.csl'
 <p>Let’s look at two examples: If you fit a three parametric testlet model <span class="citation">(<a href="#ref-Wainer.2007" role="doc-biblioref">Wainer et al., 2007</a>)</span> with around 100 persons with 270 responses each this might take three days - for a single run. To calculate the expected log pointwise predictive density (elpd) via exact LOO-CV you would have to fit this model 27.000 times. It would take round about 222 years! Fitting the (way simpler) Rasch model to the same data still takes 20 minutes for a single run - thus resulting in a computation time of one xear for the exact loo elpd. No can do that.</p>
 <p>Fortunately <span class="citation"><a href="#ref-Vehtari.2017" role="doc-biblioref">Vehtari et al.</a> (<a href="#ref-Vehtari.2017" role="doc-biblioref">2017</a>)</span> found a way to efficiantly estimate the loo elpd via Paretho-smoothing using the posterior samples of our Bayesian models. This way we get a robust estimate of the loo elpd at the cost of some minutes computation time in most cases. I was willing to spend this amount of time to get the state-of-the-art estimate for models’ predictive error - which is superior to AIC, DIC and even WAIC <span class="citation">(<a href="#ref-Vehtari.2017" role="doc-biblioref">Vehtari et al., 2017</a>)</span>. One super cool feature of PSIS LOO-CV is: it gives you a parameter (called Pareto <code>k</code>) that warns you if your model is to flexible<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a>.</p>
 <p>But of course this method has some limitations as well. And one of them strikes us when we fit latent variable (or hierarchical) models: With LOO-CV we remove just a single response at a time. But these responses aren’t independent from eachother because they all are related to one person (or cluster). Thus we might get an overoptimistic elpd value because it should be easier to predict a response based on the other responses a person gave compared to predict it by the other persons responses. So we would have to remove all the answers of a person at a time to get an unbiased estimate. <span class="citation"><a href="#ref-Vehtari.2017" role="doc-biblioref">Vehtari et al.</a> (<a href="#ref-Vehtari.2017" role="doc-biblioref">2017</a>)</span> state that - in theory - it is possible to do importance-sampling in this cases - but the more responses are related to a single person the more likely this method will result in a bad elpd estimate. Therefore they recommend using k-fold cross validation instead of LOO-CV in these cases, because this it is possible to partition the data accounting for the hierarchical structure <span class="citation">(<a href="#ref-Vehtari.16.12.2020" role="doc-biblioref">Vehtari, 16.12.2020</a>)</span>.</p>
-<p>Let’s see if k-fold cross validation is a method we could use instead of PSIS LOO-CV in daily work. If we remove all the responses of <span class="math inline">\(\frac{1}{10}\)</span>th of the persons in our dataset, fit the model and calculate the predictive error and repeat this 10 times we get a robust estimate for the elpd. This will take about three hours for our Rasch model and a month for the 3pl testlet model. The former can be done over night - the latter not. And if we don’t remove <span class="math inline">\(\frac{1}{10}\)</span>th of the persons (and their responses) but only one persons responses at a time we have to fit the model as many times as persons contributed responses to our dataset. Theirfore this will take even longer. Maybe we just should stick to the simpler models? Or being more patient? Or get better hardware? Or just use PSIS LOO-CV as long as it does not yield high Pareto <code>k</code>’s?</p>
+<p>Let’s see if k-fold cross validation is a method we could use instead of PSIS LOO-CV in daily work. If we remove all the responses of <span class="math inline">\(\frac{1}{10}\)</span>th of the persons in our dataset, fit the model and calculate the predictive error and repeat this 10 times we get a robust estimate for the elpd. This will take about three hours for our Rasch model and a month for the 3pl testlet model. The former can be done over night - the latter not. And if we don’t remove <span class="math inline">\(\frac{1}{10}\)</span>th of the persons (and their responses) but only one persons responses at a time we have to fit the model as many times as persons contributed responses to our dataset. Therefore this will take even longer. Maybe we just should stick to the simpler models? Or being more patient? Or get better hardware? Or just use PSIS LOO-CV as long as it does not yield high Pareto <code>k</code>’s?</p>
 <p>I first decided to just use the PSIS LOO-CV criteria and hope that the worse elpd estimates won’t lead to wrong decisions at model comparison. I mean - <span class="citation"><a href="#ref-burkner2020bayesian" role="doc-biblioref">Bürkner</a> (<a href="#ref-burkner2020bayesian" role="doc-biblioref">2020a</a>)</span> did so in his awesome vignette and in their case study <span class="citation"><a href="#ref-Vehtari.16.12.2020" role="doc-biblioref">Vehtari</a> (<a href="#ref-Vehtari.16.12.2020" role="doc-biblioref">16.12.2020</a>)</span> found that the order of the models was preserved and only the elpd differences varied. But some weeks ago I found the article by <span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> who tackle exactly this issue. Therefore I decided to work through the difference between conditional and marginal likelihoods and implement their approach for the <strong>birtms</strong> package.</p>
 <p><strong>Note:</strong> Right now I have no case study results to present here comparing the decisions I would have made based on PSIS LOO-CV criteria using conditional vs marginal likelihood. But I will write another blog post on this question later.</p>
 </div>
-<div id="types-of-likelihood" class="section level3">
-<h3>Types of likelihood</h3>
-<p><span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> discuss the importance of the marginal likelihood for information criteria computation of latent variable models. They contrast the marginal likelihood with the conditional likelihood and argue: one should use the marginal likelihood if it’s of interest how well the model predicts the responses of a new person. If it’s of interest how well the model predicts additional responses of a already present person one should use the conditional likelihood. Thus in psychometric contexts we should use the marginal likelihood most of the time<a href="#fn2" class="footnote-ref" id="fnref2"><sup>2</sup></a>.</p>
-<p>One important information for me was: they don’t talk about the marginal likelihood as used for Bayes factor computation (which might come to your mind first if you worked in Bayesian modeling for some time). They talk about the marginal likelihood as it is commonly used in (frequentist) IRT modeling.</p>
-<p>If we use the <strong>brms</strong> package to fit models we find a function called <code>brms::log_lik()</code>. This function will calculate the pointwise log-likelihood. Thus it is calculated by taking the logarithm of the conditional likelihood. Theirfore the <code>brms::waic()</code> and <code>brms::loo()</code> functions will result in information criteria based on the conditional likelihood<a href="#fn3" class="footnote-ref" id="fnref3"><sup>3</sup></a>.</p>
+<div id="the-likelihood-type-matters" class="section level3">
+<h3>The likelihood type matters</h3>
+<p><span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> discuss the importance of the marginal likelihood for information criteria computation of latent variable models. They contrast the marginal likelihood with the conditional likelihood and argue: one should use the marginal likelihood if it’s of interest how well the model predicts the responses of a new person. Only if it’s of interest how well the model predicts additional responses of an already present person one should use the conditional likelihood. Thus in psychometric contexts we should use the marginal likelihood most of the time<a href="#fn2" class="footnote-ref" id="fnref2"><sup>2</sup></a>.</p>
+<p>One important information for me was: they don’t talk about the marginal likelihood as used for Bayes factor (BF) computation (which might come to your mind first if you worked in Bayesian modeling for some time). They talk about the marginal likelihood as it is commonly used in (frequentist) IRT modeling. Further their conditional likelihood is called joint maximum likelihood elsewhere. I think all these terms are pretty confusing. So let’s have a short look at the corresponding likelihoods’ (L) formulas in the context of a dicotomous Rasch model<a href="#fn3" class="footnote-ref" id="fnref3"><sup>3</sup></a> to understand the difference:</p>
+<p><span class="math display">\[ \begin{align}
+&amp; \mathrm{L} &amp; = &amp; \prod_{i,j}{p\left( y_{ij} | \phi \right)} \\
+&amp; \mathrm{L}_{conditional} &amp; = &amp; \prod_{i,j}{p\left( y_{ij} | \beta_i, \theta_j \right)} \\
+&amp; \mathrm{L}_{marginal} &amp; = &amp; \prod_{i,j}{p\left( y_{ij} | \beta_i, \psi \right)} \\
+&amp; &amp; &amp; p\left( y_{ij} | \beta_i, \psi \right) = \int_{\theta_j}{p\left( y_{ij} | \beta_i, \theta_j\right)p\left( \theta_j | \psi\right) \mathrm{d}\theta_j} \\
+&amp; \mathrm{L}_{BF} &amp; = &amp; \prod_{i,j}{p\left( y_{ij} | \alpha \right)}\\
+&amp; &amp; &amp; p\left( y_{ij} | \rho \right) = \int_\phi{p\left( y_{ij} | \phi\right)p\left( \phi | \rho\right) \mathrm{d}\phi}
+\end{align} \]</span></p>
+<p>Here <span class="math inline">\(\phi\)</span> represents a set of all model parameters - for a Rasch model these are the item locations<a href="#fn4" class="footnote-ref" id="fnref4"><sup>4</sup></a> <span class="math inline">\(\beta_i\)</span> and the person locations<a href="#fn5" class="footnote-ref" id="fnref5"><sup>5</sup></a> <span class="math inline">\(\theta_j\)</span>. In many approaches the item parameters are considered as fixed effects and the person parameters are random effects with a specific prior distribution (e. g. <span class="math inline">\(\theta \sim N(0, 1)\)</span>) and the person parameters are not of direct interest <span class="citation">(<a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al., 2019</a>)</span>. Therefore the specific values get substituted by their distribution in the likelihood.</p>
+<p>However, following the tutorial on IRT modeling with <strong>brms</strong> <span class="citation">(<a href="#ref-burkner2020bayesian" role="doc-biblioref">Bürkner, 2020a</a>)</span> I handle the item parameters as random effects as well to benefit from the partial pooling effect. We will get estimates for item and person parameters anyway. But we won’t substitute the item parameters specific values with their distribution<a href="#fn6" class="footnote-ref" id="fnref6"><sup>6</sup></a>.</p>
+<p>The argumentation to use marginal likelihood in most psychometric contexts because we generally want to predict responses from a new person seems pretty convincing to me. But do we find beneficial properties of information criteria derived from the marginal likelihood as well? Yes, indeed. <span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> showed that the Monte Carlo error for information criteria based on the marginal likelihood is much lower<a href="#fn7" class="footnote-ref" id="fnref7"><sup>7</sup></a>. A precision gain is nice.</p>
+<p>But what really seems to be an issue is the following: The order in model fit ranking can be different comparing information criteria derived from conditional and marginal likelihood. E.g.: <span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> assume that conditional DIC generally prefers more more complex models as marginal DIC. Further they found that DIC and WAIC better approximate PSIS-LOO for marginal information criteria - thus being more consistent. Last but not least: they “expect similar issues to arise when one uses posterior predictive estimates to study model fit” <span class="citation">(<a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al., 2019</a>)</span>.</p>
+<p>This brings me back to my own former conclusions. In model comparison via PSIS-LOO I found that a 3PL testlet model with a common guessing parameter (hence almost a 2PL testlet model) suits the data best. But I simply used the default functions for log likelihood calculation. And the default likelihood is the conditional one! Thus I will do the model selection process once again once I coded a suitable function for multidimensional IRT models<a href="#fn8" class="footnote-ref" id="fnref8"><sup>8</sup></a>.</p>
+<p><strong>Be aware:</strong> Using the <strong>brms</strong> package to fit models you find a function called <code>brms::log_lik()</code>. This function will calculate the pointwise log-likelihood. Thus it is calculated by taking the logarithm of the conditional likelihood. Therefore the <code>brms::waic()</code> and <code>brms::loo()</code> functions will result in information criteria based on the conditional likelihood<a href="#fn9" class="footnote-ref" id="fnref9"><sup>9</sup></a>. This does not suit the recommandations of <span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span>.</p>
+<p>So what to do? Do you have to work through all the formula in the articles of <span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> and <span class="citation"><a href="#ref-RabeHesketh.2005" role="doc-biblioref">Rabe-Hesketh et al.</a> (<a href="#ref-RabeHesketh.2005" role="doc-biblioref">2005</a>)</span> to understand the algorithm and code a function all by yourself? No you don’t. And I didn’t either. Just keep reading and see how a suitable function was prepared for you.</p>
 </div>
+</div>
+<div id="calculating-the-marginal-likelihood" class="section level2">
+<h2>Calculating the marginal likelihood</h2>
+<p>Fortunately, along with their article <span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> published the R code of their calculations in the <a href="https://link.springer.com/article/10.1007/s11336-019-09679-0#Sec21">online supplementary material</a>. They use the <strong>edstan</strong> package <span class="citation">(<a href="#ref-R-edstan" role="doc-biblioref">Furr, 2017</a>)</span> to fit a Rasch model with some custom Stan code in the generated quantities block to get the latent person ability scores<a href="#fn10" class="footnote-ref" id="fnref10"><sup>10</sup></a>.</p>
+<p>The <strong>edstan</strong> package somes with some Stan code presets for IRT models. But personally I found it a bit cumbersome to alter the Stan code by hand to fit the model in my mind and therefore prefer formulating my model as a generalised (nonlinear) regression model and let <strong>brms</strong> generate the Stan code for me<a href="#fn11" class="footnote-ref" id="fnref11"><sup>11</sup></a>. In the remaining blog post I want to show you the adjustments and extensions I made to their code to calculate the marginal likelihood with <code>birtmsfit</code> objects and hope you can adapt it yourself to work on <code>brmsfit</code> objects of latent variable models more generally.</p>
+<p>First I will show you the original code by <span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span>:</p>
+<pre class="r"><code># Function to obtain marginal likelihoods with parallel processing. 
+# stan_fit: Fitted Stan model
+# data_list: Data list used in fitting model
+# MFUN: Function to calculate marginal likelihood for cluster at a node 
+#   location. This is application specific.
+# resid_name: Name of residual in Stan program to integrate out
+# sd_name: Name of SD for residual in Stan program
+# n_nodes: Number of adaptive quadrature nodes to use
+# best_only: Whether to evaluate marginal likelihood only at posterior means
+mll_parallel &lt;- function(stan_fit, data_list, MFUN, resid_name, sd_name, n_nodes,
+                         best_only = FALSE) {
+  
+  library(foreach)
+  library(statmod)       # For gauss.quad.prob()
+  library(matrixStats)   # For logSumExp()
+  
+  draws &lt;- extract(stan_fit, stan_fit@model_pars)
+  n_iter &lt;- ifelse(best_only, 0, nrow(draws$lp__))
+  post_means &lt;- better_posterior_means(stan_fit)
+  
+  # Seperate out draws for residuals and their SD
+  resid &lt;- apply(draws[[resid_name]], 2, mean)
+  stddev &lt;- apply(draws[[resid_name]], 2, sd)
+  
+  # Get standard quadrature points
+  std_quad &lt;- gauss.quad.prob(n_nodes, &quot;normal&quot;, mu = 0, sigma = 1)
+  std_log_weights &lt;- log(std_quad$weights)
+  
+  # Extra iteration is to evaluate marginal log-likelihood at parameter means.
+  ll &lt;- foreach(i = 1:(n_iter + 1), .combine = rbind,
+                .packages = &quot;matrixStats&quot;) %dopar% {
+                  
+    ll_j &lt;- matrix(NA, nrow = 1, ncol = ncol(draws[[resid_name]]))
+    
+    for(j in 1:ncol(ll_j)) {
+      
+      # Set up adaptive quadrature using SD for residuals either from draws or
+      # posterior mean (for best_ll).
+      sd_i &lt;- ifelse(i &lt;= n_iter, draws[[sd_name]][i], post_means[[sd_name]])
+      adapt_nodes &lt;- resid[j] + stddev[j] * std_quad$nodes
+      log_weights &lt;- log(sqrt(2*pi)) + log(stddev[j]) + std_quad$nodes^2/2 +
+        dnorm(adapt_nodes, sd = sd_i, log = TRUE) + std_log_weights
+      
+      # Evaluate mll with adaptive quadrature. If at n_iter + 1, evaluate
+      # marginal likelihood at posterior means.
+      if(i &lt;= n_iter) {
+        loglik_by_node &lt;- sapply(adapt_nodes, FUN = MFUN, r = j, iter = i,
+                                 data_list = data_list, draws = draws)
+        weighted_loglik_by_node &lt;- loglik_by_node + log_weights
+        ll_j[1,j] &lt;- logSumExp(weighted_loglik_by_node)
+      } else {
+        loglik_by_node &lt;- sapply(adapt_nodes, FUN = MFUN, r = j, iter = 1,
+                                 data_list = data_list, draws = post_means)
+        weighted_loglik_by_node &lt;- loglik_by_node + log_weights
+        ll_j[1,j] &lt;- logSumExp(weighted_loglik_by_node)
+      }
+      
+    }
+    
+    ll_j
+    
+  }
+  
+  if(best_only) {
+    return(ll[nrow(ll), ])
+  } else {
+    return(list(ll = ll[-nrow(ll), ], best_ll = ll[nrow(ll), ]))
+  }
+  
+}
+
+
+# Function to calculate likelihood for a cluster for an adaptive quad node
+# specific to the IRT example. Similar functions would be written for other
+# applications and passed to mll_parallel().
+# node: node location
+# r: index for cluster
+# iter: mcmc iteration
+# data_list: data used to fit Stan model
+# draws: mcmc draws from fitted Stan model
+f_marginal &lt;- function(node, r, iter, data_list, draws) {
+  y &lt;- data_list$y[data_list$jj == r]
+  theta_fix &lt;- draws$theta_fix[iter, r]
+  delta &lt;- draws$delta[iter, data_list$ii[data_list$jj == r]]
+  p &lt;- boot::inv.logit(theta_fix + node - delta)
+  sum(dbinom(y, 1, p, log = TRUE))
+}</code></pre>
+<p><em>General remarks:</em> The function <code>mll_parallel</code> uses parallel processing to speed up the calculation. That’s sweet. I didn’t knew about <strong>foreach</strong> package <span class="citation">(<a href="#ref-R-foreach" role="doc-biblioref">Microsoft &amp; Weston, 2020</a>)</span> before and was happy to learn some new tricks I might use in my upcoming package as well. On my machine the calculation of the marginal likelihood for the examplary unidimensional Rasch model takes about 50 seconds. But what we definetly don’t want are the <code>library()</code> calls inside of the function (just to get one or two functions of the packages). Instead we will work with the <code>::</code> operator<a href="#fn12" class="footnote-ref" id="fnref12"><sup>12</sup></a>, e.g. <code>matrixStats::logSumExp()</code>.</p>
+<p>In the next code block we will follow <span class="citation"><a href="#ref-Merkle.2019" role="doc-biblioref">Merkle et al.</a> (<a href="#ref-Merkle.2019" role="doc-biblioref">2019</a>)</span> fitting the IRT model on the verbal aggression dataset with the <strong>edstan</strong> package and a customized Stan script. Next we calculate the marginal likelihood using the code above and finish with printing the LOO-CV statistics and a nice Pareto <code>k</code> plot. These will be used as reference for the functions coded for the use with <code>birtms</code> objects following beneath.</p>
+<pre class="r"><code>library(rstan)
+library(doParallel)
+library(loo)
+options(mc.cores = 5)
+options(loo.cores = 5)
+
+aggression &lt;- edstan::aggression
+
+# Assemble example dataset; the considered model formula is
+#   ~ 1 + male + anger;
+dl &lt;- edstan::irt_data(y = aggression$dich, jj = aggression$person,
+               ii = aggression$item, covariates = aggression,
+               formula = ~ 1 + male + anger)
+
+# Fit model (or load fitted model)
+if (!file.exists(&#39;data/stan_fit.rds&#39;)) {
+  stan_fit &lt;- rstan::stan(&quot;data/rasch_edstan_modified.stan&quot;, data = dl, iter = 2000, chains = 4) # we draw more samples with one chain less
+  saveRDS(stan_fit, file = &#39;data/stan_fit.rds&#39;)
+} else {
+  stan_fit &lt;- readRDS(&#39;data/stan_fit.rds&#39;)
+}
+
+if (!file.exists(&#39;data/ll_marg.rds&#39;)) {
+  cl &lt;- makeCluster(5)
+  registerDoParallel(cl)
+  ll_marg &lt;- mll_parallel(stan_fit, dl, f_marginal, &quot;zeta&quot;, &quot;sigma&quot;, 11)
+  stopCluster(cl)
+  saveRDS(ll_marg, file = &#39;data/ll_marg.rds&#39;)
+} else {
+  ll_marg &lt;- readRDS(&#39;data/ll_marg.rds&#39;)
+}
+
+loo_ll_marg &lt;- loo::loo(ll_marg$ll)
+## Warning: Relative effective sample sizes (&#39;r_eff&#39; argument) not specified.
+## For models fit with MCMC, the reported PSIS effective sample sizes and 
+## MCSE estimates will be over-optimistic.
+
+print(loo_ll_marg)
+## 
+## Computed from 1250 by 316 log-likelihood matrix
+## 
+##          Estimate    SE
+## elpd_loo  -4057.5  64.5
+## p_loo        27.7   0.5
+## looic      8115.0 129.0
+## ------
+## Monte Carlo SE of elpd_loo is 0.2.
+## 
+## All Pareto k estimates are good (k &lt; 0.5).
+## See help(&#39;pareto-k-diagnostic&#39;) for details.
+plot(loo_ll_marg)</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+<p>As we can see the likelihood was evaluated at around 300 points. These are related to the 316 persons who answered 24 items each. We find no Pareto <code>k</code> over <code>.5</code>. Actually we find some with negative value, which is fine. We should be concerned if we find values over <code>.7</code>. Next we will fit the model above twice with <strong>brms</strong>. First we fit the model with items as fixed effects which equals the model we fitted with <strong>edstan</strong> before. Second we fit the model with items as random effects which follows <span class="citation"><a href="#ref-burkner2020bayesian" role="doc-biblioref">Bürkner</a> (<a href="#ref-burkner2020bayesian" role="doc-biblioref">2020a</a>)</span> recommondations and will be equal to the models fit with <strong>birtms</strong>. We will see that they both fit as well.</p>
+<pre class="r"><code>library(brms)
+## Loading required package: Rcpp
+## Loading &#39;brms&#39; package (version 2.14.4). Useful instructions
+## can be found by typing help(&#39;brms&#39;). A more detailed introduction
+## to the package is available through vignette(&#39;brms_overview&#39;).
+## 
+## Attaching package: &#39;brms&#39;
+## The following object is masked from &#39;package:rstan&#39;:
+## 
+##     loo
+## The following object is masked from &#39;package:stats&#39;:
+## 
+##     ar
+
+formula_aggression_1pl_fixed &lt;- bf(dich ~ 1 + item + (1 | person) + male + anger)
+formula_aggression_1pl_random &lt;- bf(dich ~ 1 + (1 | item) + (1 | person) + male + anger)
+
+# Fit model (or load fitted model)
+if (!file.exists(&#39;data/fit_aggression_1pl_fixed.rds&#39;)) {
+  fit_aggression_1pl_fixed &lt;- brm(
+  formula = formula_aggression_1pl_fixed,
+  data = aggression,
+  family = brmsfamily(&quot;bernoulli&quot;, &quot;logit&quot;),
+  file = &#39;data/fit_aggression_1pl_fixed.rds&#39;
+)
+} else {
+  fit_aggression_1pl_fixed &lt;- readRDS(&#39;data/fit_aggression_1pl_fixed.rds&#39;)
+}
+
+if (!file.exists(&#39;data/fit_aggression_1pl_random.rds&#39;)) {
+  fit_aggression_1pl_random &lt;- brm(
+  formula = formula_aggression_1pl_random,
+  data = aggression,
+  family = brmsfamily(&quot;bernoulli&quot;, &quot;logit&quot;),
+  file = &#39;data/fit_aggression_1pl_random.rds&#39;
+)
+} else {
+  fit_aggression_1pl_random &lt;- readRDS(&#39;data/fit_aggression_1pl_random.rds&#39;)
+}</code></pre>
+<p>Conditional / pointwise log-likelihood in 22 seconds.</p>
+<pre><code>Computed from 4000 by 7584 log-likelihood matrix
+
+         Estimate   SE
+elpd_loo  -3867.3 43.8
+p_loo       287.7  4.1
+looic      7734.7 87.6
+------
+Monte Carlo SE of elpd_loo is 0.3.
+
+All Pareto k estimates are good (k &lt; 0.5).
+See help(&#39;pareto-k-diagnostic&#39;) for details.</code></pre>
 </div>
 <div id="references" class="section level2 unnumbered">
 <h2>References</h2>
@@ -45,8 +258,17 @@ Bürkner, P.-C. (2020a). <em>Bayesian item response modeling in r with brms and 
 <div id="ref-R-brms" class="csl-entry">
 Bürkner, P.-C. (2020b). <em>Brms: Bayesian regression models using stan</em>. <a href="https://CRAN.R-project.org/package=brms">https://CRAN.R-project.org/package=brms</a>
 </div>
+<div id="ref-R-edstan" class="csl-entry">
+Furr, D. C. (2017). <em>Edstan: Stan models for item response theory</em>. <a href="https://CRAN.R-project.org/package=edstan">https://CRAN.R-project.org/package=edstan</a>
+</div>
 <div id="ref-Merkle.2019" class="csl-entry">
 Merkle, E. C., Furr, D., &amp; Rabe-Hesketh, S. (2019). Bayesian comparison of latent variable models: Conditional versus marginal likelihoods. <em>Psychometrika</em>, <em>84</em>(3), 802–829. <a href="https://doi.org/10.1007/s11336-019-09679-0">https://doi.org/10.1007/s11336-019-09679-0</a>
+</div>
+<div id="ref-R-foreach" class="csl-entry">
+Microsoft, &amp; Weston, S. (2020). <em>Foreach: Provides foreach looping construct</em>. <a href="https://CRAN.R-project.org/package=foreach">https://CRAN.R-project.org/package=foreach</a>
+</div>
+<div id="ref-RabeHesketh.2005" class="csl-entry">
+Rabe-Hesketh, S., Skrondal, A., &amp; Pickles, A. (2005). Maximum likelihood estimation of limited and discrete dependent variable models with nested random effects. <em>Journal of Econometrics</em>, <em>128</em>(2), 301–323. <a href="https://doi.org/10.1016/j.jeconom.2004.08.017">https://doi.org/10.1016/j.jeconom.2004.08.017</a>
 </div>
 <div id="ref-Vehtari.16.12.2020" class="csl-entry">
 Vehtari, A. (16.12.2020). <em>Cross-validation for hierarchical models</em>. <a href="https://avehtari.github.io/modelselection/rats_kcv.html">https://avehtari.github.io/modelselection/rats_kcv.html</a>
@@ -67,6 +289,15 @@ Wainer, H., Bradlow, E. T., &amp; Wang, X. (2007). <em>Testlet response theory a
 <ol>
 <li id="fn1"><p>This hinted me a missspecification in my testlet models: you can’t estimate a persons skill for a testlet with a single item in it.<a href="#fnref1" class="footnote-back">↩︎</a></p></li>
 <li id="fn2"><p>An exception might be the context of adaptive testing where we want to know when our model can predict future responses of a person well enough - or equivalently: when does the incorporation of new responses stop contributing to our model’s predictive precision - so we can stop the measurement.<a href="#fnref2" class="footnote-back">↩︎</a></p></li>
-<li id="fn3"><p>They calculate the pointwise log-likelihood and then call the corresponding functions in the <strong>loo</strong> package <span class="citation">(<a href="#ref-Vehtari2020-wk" role="doc-biblioref">Vehtari et al., 2020</a>)</span>.<a href="#fnref3" class="footnote-back">↩︎</a></p></li>
+<li id="fn3"><p>Hence we assume the items are conditional independend.<a href="#fnref3" class="footnote-back">↩︎</a></p></li>
+<li id="fn4"><p>You can use difficulties or easynesses.<a href="#fnref4" class="footnote-back">↩︎</a></p></li>
+<li id="fn5"><p>You might call this abilities or skill values.<a href="#fnref5" class="footnote-back">↩︎</a></p></li>
+<li id="fn6"><p>If we integrate out the item parameters as well as the person parameters we’ll get the likelihood used for Bayes factor calculation.<a href="#fnref6" class="footnote-back">↩︎</a></p></li>
+<li id="fn7"><p>Nevertheless, the Monte Carlo error for the marginal likelihood is still substantial if your chains ran to short and you have to few posterior samples.<a href="#fnref7" class="footnote-back">↩︎</a></p></li>
+<li id="fn8"><p><span class="citation"><a href="#ref-RabeHesketh.2005" role="doc-biblioref">Rabe-Hesketh et al.</a> (<a href="#ref-RabeHesketh.2005" role="doc-biblioref">2005</a>)</span> show a spherical approach to efficiently adaptive gaussian quadrature approximation over the latent person variables.<a href="#fnref8" class="footnote-back">↩︎</a></p></li>
+<li id="fn9"><p>They calculate the pointwise log-likelihood and then call the corresponding functions in the <strong>loo</strong> package <span class="citation">(<a href="#ref-Vehtari2020-wk" role="doc-biblioref">Vehtari et al., 2020</a>)</span>.<a href="#fnref9" class="footnote-back">↩︎</a></p></li>
+<li id="fn10"><p>They substract the fixed effect person covariates from the theta variable - thus their zeta vector should be centered close to zero.<a href="#fnref10" class="footnote-back">↩︎</a></p></li>
+<li id="fn11"><p>Although I have to admit that there are some special cases where I don’t find a way to specify all restrictions I want to make for my model within <strong>brms</strong> syntax (efficiently) and therefore will pass some custom Stan code. One limit I recently found was latent variable modeling as you can do in a SEM but I hope that this feature will come with version 3 - I realy hope you get the founding for the extension of your awesome package, Paul. 😉<a href="#fnref11" class="footnote-back">↩︎</a></p></li>
+<li id="fn12"><p>If you don’t want to use <code>::</code> you should use <code>require</code> instead of <code>library</code> inside a function.<a href="#fnref12" class="footnote-back">↩︎</a></p></li>
 </ol>
 </div>

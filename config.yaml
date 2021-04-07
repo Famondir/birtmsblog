@@ -5,8 +5,8 @@ theme: "starter-academic"
 # This file is formatted using YAML syntax - learn more at https://learnxinyminutes.com/docs/yaml/
 
 title: Bayesian Item Response Modeling in R # Website name
-baseurl: '' # Website URL
-copyright: '' # Footer text, e.g. '© {year} Me'
+baseurl: 'https://birtms.netlify.app/' # Website URL
+copyright: '© {year} Simon Schäfer' # Footer text, e.g. '© {year} Me'
 
 ############################
 ## LANGUAGE

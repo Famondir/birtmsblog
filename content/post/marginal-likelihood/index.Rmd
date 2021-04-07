@@ -6,6 +6,8 @@ categories: ["R"]
 tags: ["Bayesian", "likelihood", "regression", "IRT"]
 bibliography: ['../biblio.bib']
 csl: '../apa.csl'
+editor_options: 
+  chunk_output_type: inline
 ---
 
 ```{r setup, include=FALSE}
@@ -32,19 +34,265 @@ Fortunately @Vehtari.2017 found a way to efficiantly estimate the loo elpd via P
 
 But of course this method has some limitations as well. And one of them strikes us when we fit latent variable (or hierarchical) models: With LOO-CV we remove just a single response at a time. But these responses aren't independent from eachother because they all are related to one person (or cluster). Thus we might get an overoptimistic elpd value because it should be easier to predict a response based on the other responses a person gave compared to predict it by the other persons responses. So we would have to remove all the answers of a person at a time to get an unbiased estimate. @Vehtari.2017 state that - in theory - it is possible to do importance-sampling in this cases - but the more responses are related to a single person the more likely this method will result in a bad elpd estimate. Therefore they recommend using k-fold cross validation instead of LOO-CV in these cases, because this it is possible to partition the data accounting for the hierarchical structure [@Vehtari.16.12.2020].
 
-Let's see if k-fold cross validation is a method we could use instead of PSIS LOO-CV in daily work. If we remove all the responses of $\frac{1}{10}$th of the persons in our dataset, fit the model and calculate the predictive error and repeat this 10 times we get a robust estimate for the elpd. This will take about three hours for our Rasch model and a month for the 3pl testlet model. The former can be done over night - the latter not. And if we don't remove $\frac{1}{10}$th of the persons (and their responses) but only one persons responses at a time we have to fit the model as many times as persons contributed responses to our dataset. Theirfore this will take even longer. Maybe we just should stick to the simpler models? Or being more patient? Or get better hardware? Or just use PSIS LOO-CV as long as it does not yield high Pareto `k`'s?
+Let's see if k-fold cross validation is a method we could use instead of PSIS LOO-CV in daily work. If we remove all the responses of $\frac{1}{10}$th of the persons in our dataset, fit the model and calculate the predictive error and repeat this 10 times we get a robust estimate for the elpd. This will take about three hours for our Rasch model and a month for the 3pl testlet model. The former can be done over night - the latter not. And if we don't remove $\frac{1}{10}$th of the persons (and their responses) but only one persons responses at a time we have to fit the model as many times as persons contributed responses to our dataset. Therefore this will take even longer. Maybe we just should stick to the simpler models? Or being more patient? Or get better hardware? Or just use PSIS LOO-CV as long as it does not yield high Pareto `k`'s?
 
 I first decided to just use the PSIS LOO-CV criteria and hope that the worse elpd estimates won't lead to wrong decisions at model comparison. I mean - @burkner2020bayesian did so in his awesome vignette and in their case study @Vehtari.16.12.2020 found that the order of the models was preserved and only the elpd differences varied. But some weeks ago I found the article by @Merkle.2019 who tackle exactly this issue. Therefore I decided to work through the difference between conditional and marginal likelihoods and implement their approach for the **birtms** package.
 
 **Note:** Right now I have no case study results to present here comparing the decisions I would have made based on PSIS LOO-CV criteria using conditional vs marginal likelihood. But I will write another blog post on this question later. 
 
-### Types of likelihood
+### The likelihood type matters
 
-@Merkle.2019 discuss the importance of the marginal likelihood for information criteria computation of latent variable models. They contrast the marginal likelihood with the conditional likelihood and argue: one should use the marginal likelihood if it's of interest how well the model predicts the responses of a new person. If it's of interest how well the model predicts additional responses of a already present person one should use the conditional likelihood. Thus in psychometric contexts we should use the marginal likelihood most of the time^[An exception might be the context of adaptive testing where we want to know when our model can predict future responses of a person well enough - or equivalently: when does the incorporation of new responses stop contributing to our model's predictive precision - so we can stop the measurement.].
+@Merkle.2019 discuss the importance of the marginal likelihood for information criteria computation of latent variable models. They contrast the marginal likelihood with the conditional likelihood and argue: one should use the marginal likelihood if it's of interest how well the model predicts the responses of a new person. Only if it's of interest how well the model predicts additional responses of an already present person one should use the conditional likelihood. Thus in psychometric contexts we should use the marginal likelihood most of the time^[An exception might be the context of adaptive testing where we want to know when our model can predict future responses of a person well enough - or equivalently: when does the incorporation of new responses stop contributing to our model's predictive precision - so we can stop the measurement.].
 
-One important information for me was: they don't talk about the marginal likelihood as used for Bayes factor computation (which might come to your mind first if you worked in Bayesian modeling for some time). They talk about the marginal likelihood as it is commonly used in (frequentist) IRT modeling.
+One important information for me was: they don't talk about the marginal likelihood as used for Bayes factor (BF) computation (which might come to your mind first if you worked in Bayesian modeling for some time). They talk about the marginal likelihood as it is commonly used in (frequentist) IRT modeling. Further their conditional likelihood is called joint maximum likelihood elsewhere. I think all these terms are pretty confusing. So let's have a short look at the corresponding likelihoods' (L) formulas in the context of a dicotomous Rasch model^[Hence we assume the items are conditional independend.] to understand the difference:
 
-If we use the **brms** package to fit models we find a function called `brms::log_lik()`. This function will calculate the pointwise log-likelihood. Thus it is calculated by taking the logarithm of the conditional likelihood. Theirfore the `brms::waic()` and `brms::loo()` functions will result in information criteria based on the conditional likelihood^[They calculate the pointwise log-likelihood and then call the corresponding functions in the **loo** package [@Vehtari2020-wk].].
+$$ \begin{align}
+& \mathrm{L} & = & \prod_{i,j}{p\left( y_{ij} | \phi \right)} \\
+& \mathrm{L}_{conditional} & = & \prod_{i,j}{p\left( y_{ij} | \beta_i, \theta_j \right)} \\
+& \mathrm{L}_{marginal} & = & \prod_{i,j}{p\left( y_{ij} | \beta_i, \psi \right)} \\
+& & & p\left( y_{ij} | \beta_i, \psi \right) = \int_{\theta_j}{p\left( y_{ij} | \beta_i, \theta_j\right)p\left( \theta_j | \psi\right) \mathrm{d}\theta_j} \\
+& \mathrm{L}_{BF} & = & \prod_{i,j}{p\left( y_{ij} | \alpha \right)}\\
+& & & p\left( y_{ij} | \rho \right) = \int_\phi{p\left( y_{ij} | \phi\right)p\left( \phi | \rho\right) \mathrm{d}\phi}
+\end{align} $$
+
+Here $\phi$ represents a set of all model parameters - for a Rasch model these are the item locations^[You can use difficulties or easynesses.] $\beta_i$ and the person locations^[You might call this abilities or skill values.] $\theta_j$. In many approaches the item parameters are considered as fixed effects and the person parameters are random effects with a specific prior distribution (e. g. $\theta \sim N(0, 1)$) and the person parameters are not of direct interest [@Merkle.2019]. Therefore the specific values get substituted by their distribution in the likelihood.
+
+However, following the tutorial on IRT modeling with **brms** [@burkner2020bayesian] I handle the item parameters as random effects as well to benefit from the partial pooling effect. We will get estimates for item and person parameters anyway. But we won't substitute the item parameters specific values with their distribution^[If we integrate out the item parameters as well as the person parameters we'll get the likelihood used for Bayes factor calculation.].
+
+The argumentation to use marginal likelihood in most psychometric contexts because we generally want to predict responses from a new person seems pretty convincing to me. But do we find beneficial properties of information criteria derived from the marginal likelihood as well? Yes, indeed. @Merkle.2019 showed that the Monte Carlo error for information criteria based on the marginal likelihood is much lower^[Nevertheless, the Monte Carlo error for the marginal likelihood is still substantial if your chains ran to short and you have to few posterior samples.]. A precision gain is nice.
+
+But what really seems to be an issue is the following: The order in model fit ranking can be different comparing information criteria derived from conditional and marginal likelihood. E.g.: @Merkle.2019 assume that conditional DIC generally prefers more more complex models as marginal DIC. Further they found that DIC and WAIC better approximate PSIS-LOO for marginal information criteria - thus being more consistent. Last but not least: they "expect similar issues to arise when one uses posterior predictive estimates to study model fit" [@Merkle.2019].
+
+This brings me back to my own former conclusions. In model comparison via PSIS-LOO I found that a 3PL testlet model with a common guessing parameter (hence almost a 2PL testlet model) suits the data best. But I simply used the default functions for log likelihood calculation. And the default likelihood is the conditional one! Thus I will do the model selection process once again once I coded a suitable function for multidimensional IRT models^[@RabeHesketh.2005 show a spherical approach to efficiently adaptive gaussian quadrature approximation over the latent person variables.].
+
+**Be aware:** Using the **brms** package to fit models you find a function called `brms::log_lik()`. This function will calculate the pointwise log-likelihood. Thus it is calculated by taking the logarithm of the conditional likelihood. Therefore the `brms::waic()` and `brms::loo()` functions will result in information criteria based on the conditional likelihood^[They calculate the pointwise log-likelihood and then call the corresponding functions in the **loo** package [@Vehtari2020-wk].]. This does not suit the recommandations of @Merkle.2019.
+
+So what to do? Do you have to work through all the formula in the articles of @Merkle.2019 and @RabeHesketh.2005 to understand the algorithm and code a function all by yourself? No you don't. And I didn't either. Just keep reading and see how a suitable function was prepared for you.
+
+## Calculating the marginal likelihood
+
+Fortunately, along with their article @Merkle.2019 published the R code of their calculations in the [online supplementary material ](https://link.springer.com/article/10.1007/s11336-019-09679-0#Sec21). They use the **edstan** package [@R-edstan] to fit a Rasch model with some custom Stan code in the generated quantities block to get the latent person ability scores^[They substract the fixed effect person covariates from the theta variable - thus their zeta vector should be centered close to zero.].
+
+The **edstan** package somes with some Stan code presets for IRT models. But personally I found it a bit cumbersome to alter the Stan code by hand to fit the model in my mind and therefore prefer formulating my model as a generalised (nonlinear) regression model and let **brms** generate the Stan code for me^[Although I have to admit that there are some special cases where I don't find a way to specify all restrictions I want to make for my model within **brms** syntax (efficiently) and therefore will pass some custom Stan code. One limit I recently found was latent variable modeling as you can do in a SEM but I hope that this feature will come with version 3 - I realy hope you get the founding for the extension of your awesome package, Paul. 😉]. In the remaining blog post I want to show you the adjustments and extensions I  made to their code to calculate the marginal likelihood with `birtmsfit` objects and hope you can adapt it yourself to work on `brmsfit` objects of latent variable models more generally.
+
+First I will show you the original code by @Merkle.2019:
+
+```{r}
+# Function to obtain marginal likelihoods with parallel processing. 
+# stan_fit: Fitted Stan model
+# data_list: Data list used in fitting model
+# MFUN: Function to calculate marginal likelihood for cluster at a node 
+#   location. This is application specific.
+# resid_name: Name of residual in Stan program to integrate out
+# sd_name: Name of SD for residual in Stan program
+# n_nodes: Number of adaptive quadrature nodes to use
+# best_only: Whether to evaluate marginal likelihood only at posterior means
+mll_parallel <- function(stan_fit, data_list, MFUN, resid_name, sd_name, n_nodes,
+                         best_only = FALSE) {
+  
+  library(foreach)
+  library(statmod)       # For gauss.quad.prob()
+  library(matrixStats)   # For logSumExp()
+  
+  draws <- extract(stan_fit, stan_fit@model_pars)
+  n_iter <- ifelse(best_only, 0, nrow(draws$lp__))
+  post_means <- better_posterior_means(stan_fit)
+  
+  # Seperate out draws for residuals and their SD
+  resid <- apply(draws[[resid_name]], 2, mean)
+  stddev <- apply(draws[[resid_name]], 2, sd)
+  
+  # Get standard quadrature points
+  std_quad <- gauss.quad.prob(n_nodes, "normal", mu = 0, sigma = 1)
+  std_log_weights <- log(std_quad$weights)
+  
+  # Extra iteration is to evaluate marginal log-likelihood at parameter means.
+  ll <- foreach(i = 1:(n_iter + 1), .combine = rbind,
+                .packages = "matrixStats") %dopar% {
+                  
+    ll_j <- matrix(NA, nrow = 1, ncol = ncol(draws[[resid_name]]))
+    
+    for(j in 1:ncol(ll_j)) {
+      
+      # Set up adaptive quadrature using SD for residuals either from draws or
+      # posterior mean (for best_ll).
+      sd_i <- ifelse(i <= n_iter, draws[[sd_name]][i], post_means[[sd_name]])
+      adapt_nodes <- resid[j] + stddev[j] * std_quad$nodes
+      log_weights <- log(sqrt(2*pi)) + log(stddev[j]) + std_quad$nodes^2/2 +
+        dnorm(adapt_nodes, sd = sd_i, log = TRUE) + std_log_weights
+      
+      # Evaluate mll with adaptive quadrature. If at n_iter + 1, evaluate
+      # marginal likelihood at posterior means.
+      if(i <= n_iter) {
+        loglik_by_node <- sapply(adapt_nodes, FUN = MFUN, r = j, iter = i,
+                                 data_list = data_list, draws = draws)
+        weighted_loglik_by_node <- loglik_by_node + log_weights
+        ll_j[1,j] <- logSumExp(weighted_loglik_by_node)
+      } else {
+        loglik_by_node <- sapply(adapt_nodes, FUN = MFUN, r = j, iter = 1,
+                                 data_list = data_list, draws = post_means)
+        weighted_loglik_by_node <- loglik_by_node + log_weights
+        ll_j[1,j] <- logSumExp(weighted_loglik_by_node)
+      }
+      
+    }
+    
+    ll_j
+    
+  }
+  
+  if(best_only) {
+    return(ll[nrow(ll), ])
+  } else {
+    return(list(ll = ll[-nrow(ll), ], best_ll = ll[nrow(ll), ]))
+  }
+  
+}
+
+
+# Function to calculate likelihood for a cluster for an adaptive quad node
+# specific to the IRT example. Similar functions would be written for other
+# applications and passed to mll_parallel().
+# node: node location
+# r: index for cluster
+# iter: mcmc iteration
+# data_list: data used to fit Stan model
+# draws: mcmc draws from fitted Stan model
+f_marginal <- function(node, r, iter, data_list, draws) {
+  y <- data_list$y[data_list$jj == r]
+  theta_fix <- draws$theta_fix[iter, r]
+  delta <- draws$delta[iter, data_list$ii[data_list$jj == r]]
+  p <- boot::inv.logit(theta_fix + node - delta)
+  sum(dbinom(y, 1, p, log = TRUE))
+}
+```
+
+*General remarks:* The function `mll_parallel` uses parallel processing to speed up the calculation. That's sweet. I didn't knew about **foreach** package [@R-foreach] before and was happy to learn some new tricks I might use in my upcoming package as well. On my machine the calculation of the marginal likelihood for the examplary unidimensional Rasch model takes about 158 seconds^[Notice that I used longer chains. To fit the 500 iterations in five chains as described in @Merkle.2019 my machine took about 50 seconds.]. But what we definetly don't want are the `library()` calls inside of the function (just to get one or two functions of the packages). Instead we will work with the `::` operator^[If you don't want to use `::` you should use `require` instead of `library` inside a function.], e.g. `matrixStats::logSumExp()`.
+
+```{r, echo = FALSE}
+# Replacement for rstan::get_posterior_means() that returns object with same
+# structure as rstan::extract()
+# stan_fit: A fitted Stan model
+better_posterior_means <- function(stan_fit) {
+  draws <- extract(stan_fit, stan_fit@model_pars)
+  f <- function(x) {
+    dims <- dim(x)
+    n_dims <- length(dims)
+    if (n_dims == 1) {
+      mean(x)
+    } else {
+      m <- apply(x, 2:n_dims, mean)
+      array(m, dim = c(1, dims[-1]))
+    }
+  }
+  lapply(draws, f)
+}
+```
+
+In the next code block we will follow @Merkle.2019 fitting the IRT model on the verbal aggression dataset with the **edstan** package and a customized Stan script. Next we calculate the marginal likelihood using the code above and finish with printing the LOO-CV statistics and a nice Pareto `k` plot. These will be used as reference for the functions coded for the use with `birtms` objects following beneath.
+
+```{r, message=FALSE}
+library(rstan)
+library(doParallel)
+library(loo)
+library(tidyverse)
+options(mc.cores = 5)
+options(loo.cores = 5)
+
+aggression <- edstan::aggression %>% mutate(item = as.character(item))
+
+# Assemble example dataset; the considered model formula is
+#   ~ 1 + male + anger;
+dl <- edstan::irt_data(y = aggression$dich, jj = aggression$person,
+               ii = aggression$item, covariates = aggression,
+               formula = ~ 1 + male + anger)
+
+# Fit model (or load fitted model)
+if (!file.exists('data/stan_fit.rds')) {
+  stan_fit <- rstan::stan("data/rasch_edstan_modified.stan", data = dl, iter = 500, chains = 5) # we draw more samples with one chain less
+  saveRDS(stan_fit, file = 'data/stan_fit.rds')
+  
+  cl <- makeCluster(5)
+  registerDoParallel(cl)
+  ll_marg <- mll_parallel(stan_fit, dl, f_marginal, "zeta", "sigma", 11)
+  stopCluster(cl)
+  saveRDS(ll_marg, file = 'data/ll_marg.rds')
+} else {
+  stan_fit <- readRDS('data/stan_fit.rds')
+  
+  ll_marg <- readRDS('data/ll_marg.rds')
+}
+
+loo_ll_marg <- loo::loo(ll_marg$ll)
+
+print(loo_ll_marg)
+plot(loo_ll_marg)
+```
+
+As we can see the likelihood was evaluated at around 300 points. These are related to the 316 persons who answered 24 items each. We find no Pareto `k` over `.5`. Actually we find some with negative value, which is fine. We should be concerned if we find values over `.7`. Next we will fit the model above twice with **brms**. First we fit the model with items as fixed effects which equals the model we fitted with **edstan** before. Second we fit the model with items as random effects which follows @burkner2020bayesian recommondations and will be equal to the models fit with **birtms**.
+
+```{r}
+library(brms)
+
+formula_aggression_1pl_fixed <- bf(dich ~ 1 + item + (1 | person) + male + anger)
+formula_aggression_1pl_random <- bf(dich ~ 1 + (1 | item) + (1 | person) + male + anger)
+
+# Fit model (or load fitted model)
+if (!file.exists('data/fit_aggression_1pl_fixed.rds')) {
+  fit_aggression_1pl_fixed <- brm(
+    formula = formula_aggression_1pl_fixed,
+    data = aggression,
+    family = brmsfamily("bernoulli", "logit"),
+    file = 'data/fit_aggression_1pl_fixed.rds'
+  )
+  fit_aggression_1pl_fixed <- add_criterion(fit_aggression_1pl_fixed, 'loo') # does not save automatically for some reason
+  saveRDS(fit_aggression_1pl_fixed, file = 'data/fit_aggression_1pl_fixed.rds')
+   
+  # ll_cond_fixed <- log_lik(fit_aggression_1pl_fixed)
+  # saveRDS(ll_cond_fixed, file = 'data/ll_cond_fixed.rds')
+} else {
+  fit_aggression_1pl_fixed <- readRDS('data/fit_aggression_1pl_fixed.rds')
+  
+  ll_cond_fixed <- readRDS('data/fit_aggression_1pl_fixed.rds')
+}
+
+if (!file.exists('data/fit_aggression_1pl_random.rds')) {
+  fit_aggression_1pl_random <- brm(
+    formula = formula_aggression_1pl_random,
+    data = aggression,
+    family = brmsfamily("bernoulli", "logit"),
+    file = 'data/fit_aggression_1pl_random.rds'
+  )
+  fit_aggression_1pl_random <- add_criterion(fit_aggression_1pl_random, 'loo')
+  
+  # ll_cond_random <- log_lik(fit_aggression_1pl_random)
+  # saveRDS(ll_cond_random, file = 'data/ll_cond_random.rds')
+} else {
+  fit_aggression_1pl_random <- readRDS('data/fit_aggression_1pl_random.rds')
+  
+  ll_cond_random <- readRDS('data/fit_aggression_1pl_random.rds')
+}
+
+loo(fit_aggression_1pl_fixed, fit_aggression_1pl_random)
+```
+
+It took 19 s to compute each of the conditional likelihoods. 
+Conditional / pointwise log-likelihood in 22 seconds.
+
+```
+Computed from 4000 by 7584 log-likelihood matrix
+
+         Estimate   SE
+elpd_loo  -3867.3 43.8
+p_loo       287.7  4.1
+looic      7734.7 87.6
+------
+Monte Carlo SE of elpd_loo is 0.3.
+
+All Pareto k estimates are good (k < 0.5).
+See help('pareto-k-diagnostic') for details.
+```
+
 
 ## References
 
