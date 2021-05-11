@@ -293,7 +293,126 @@ plot(loo(fit_aggression_1pl_fixed))</code></pre>
 </div>
 <div id="marginal-likelihood-with-brms" class="section level3">
 <h3>Marginal likelihood with brms</h3>
-<pre class="r"><code># uses matrix objects instead of tibbles to store data and vectorisation to calculate loglikelihood
+<pre class="r"><code>
+MFUN0 &lt;- function(node, r, iter, data_list2, draws2, linear_terms) {
+  resp_numbers &lt;- data_list2[data_list2$person == unique(data_list2$person)[[r]],&quot;resp_number&quot;]
+
+  y &lt;- data_list2$dich[resp_numbers]
+  base_term &lt;- linear_terms[iter, resp_numbers] - draws2$theta[[iter, r]]
+
+  p &lt;- brms::inv_logit_scaled(base_term + node)
+  sum(dbinom(y, 1, p, log = TRUE))
+}
+
+mll_parallel_brms1 &lt;- function(fit, MFUN, n_nodes = 11, best_only = FALSE, cores = 4) {
+  
+  # ----- create a temporary logging file ----
+  tempDir &lt;- tempfile()
+  dir.create(tempDir)
+  logFile &lt;- file.path(tempDir, &quot;log.txt&quot;)
+  viewer &lt;- getOption(&quot;viewer&quot;)
+  viewer(logFile)
+  
+  # ----- initialise multiple workers ----
+  cl &lt;- parallel::makeCluster(cores, outfile = logFile)
+  doParallel::registerDoParallel(cl)
+  on.exit(parallel::stopCluster(cl)) # terminate workes when finished
+  
+  # we get the dataset from the brms fit and add row and person numbers instead of passing it to the function
+  data_list2 &lt;- fit$data %&gt;% mutate(resp_number = row_number(),
+                                    person_number = as.numeric(factor(person, levels = unique(person))))
+
+  #browser()
+  
+  draws2 &lt;- list(sd = tidybayes::spread_draws(fit, sd_person__Intercept) %&gt;%
+                   rename(sd_person = sd_person__Intercept) %&gt;%
+                   select(!starts_with(&#39;.&#39;)),
+                 theta = tidybayes::spread_draws(fit, r_person[person,]) %&gt;%
+                   pivot_wider(values_from = r_person, names_from = person) %&gt;%
+                   select(!starts_with(&#39;.&#39;))
+                 )
+
+  n_iter2 &lt;- nsamples(fit)
+
+  post_means2 &lt;- map(draws2, ~matrix(colMeans(.), nrow = 1))
+
+  # Seperate out draws for residuals and their SD
+  resid2 &lt;- ranef(fit)$person[,1,1]
+  stddev2 &lt;- ranef(fit)$person[,2,1]
+
+  n_persons &lt;- length(resid2)
+
+  # Get standard quadrature points
+  std_quad &lt;- statmod::gauss.quad.prob(n_nodes, &quot;normal&quot;, mu = 0, sigma = 1)
+  std_log_weights &lt;- log(std_quad$weights)
+
+  linear_terms &lt;- fitted(fit, scale = &#39;linear&#39;, summary = FALSE)
+  linear_terms_mean &lt;- matrix(colMeans(linear_terms), nrow = 1)
+
+  # Extra iteration is to evaluate marginal log-likelihood at parameter means.
+  ll &lt;- foreach::`%dopar%`(foreach::foreach(i = 1:(n_iter2 + 1), .combine = rbind, 
+                                            .packages = &quot;matrixStats&quot;
+                                            ),
+                           {
+                  my_options &lt;- options(digits.secs = 3)
+                  on.exit(options(my_options))
+
+                  if(i %% 100 == 0 ) {
+                    print(paste(i, strptime(Sys.time(), &quot;%Y-%m-%d %H:%M:%OS&quot;) ))
+                  }
+
+                  ll_j &lt;- matrix(NA, nrow = 1, ncol = n_persons)
+
+                  for(j in 1:n_persons) {
+
+                    # Set up adaptive quadrature using SD for residuals either from draws or
+                    # posterior mean (for best_ll).
+                    sd_i &lt;- ifelse(i &lt;= n_iter2, draws2$sd$sd_person[[i]], post_means2$sd[[1]])
+                    adapt_nodes &lt;- resid2[[j]] + stddev2[[j]] * std_quad$nodes
+                    log_weights &lt;- log(sqrt(2*pi)) + log(stddev2[[j]]) + std_quad$nodes^2/2 +
+                      dnorm(adapt_nodes, sd = sd_i, log = TRUE) + std_log_weights
+
+                    # Evaluate mll with adaptive quadrature. If at n_iter + 1, evaluate
+                    # marginal likelihood at posterior means.
+                    if(i &lt;= n_iter2) {
+
+                      loglik_by_node &lt;- sapply(adapt_nodes, FUN = MFUN, r = j, iter = i,
+                                               data_list = data_list2, draws = draws2, linear_terms = linear_terms)
+
+                      weighted_loglik_by_node &lt;- loglik_by_node + log_weights
+                      ll_j[1,j] &lt;- matrixStats::logSumExp(weighted_loglik_by_node)
+                    } else {
+                      loglik_by_node &lt;- sapply(adapt_nodes, FUN = MFUN, r = j, iter = 1,
+                                 data_list = data_list2, draws = post_means2, linear_terms = linear_terms_mean)
+                      
+                      weighted_loglik_by_node &lt;- loglik_by_node + log_weights
+                      ll_j[1,j] &lt;- matrixStats::logSumExp(weighted_loglik_by_node)
+                    }
+
+                  }
+
+                  ll_j
+
+                })
+  
+  if(best_only) {
+    return(ll[nrow(ll), ])
+  } else {
+    return(list(ll = ll[-nrow(ll), ], best_ll = ll[nrow(ll), ]))
+  }
+
+}
+
+MFUN1 &lt;- function(node, r, iter, data_list2, draws2, linear_terms) {
+  resp_numbers &lt;- data_list2$resp_number[data_list2$person_number == r]
+  y &lt;- data_list2$dich[resp_numbers]
+  base_term &lt;- linear_terms[iter, resp_numbers] - draws2$theta[[iter, r]]
+
+  p &lt;- brms::inv_logit_scaled(base_term + node)
+  sum(dbinom(y, 1, p, log = TRUE))
+}
+
+# uses matrix objects instead of tibbles to store data
 mll_parallel_brms2 &lt;- function(fit, MFUN, n_nodes = 11, best_only = FALSE, cores = 4) {
 
   # ----- create a temporary logging file ----
@@ -504,6 +623,37 @@ MFUN3 &lt;- function(node, r, iter, data_list2, draws2, linear_terms) {
   p2 &lt;- brms::inv_logit_scaled(matrix(rep(base_term, length(node)), nrow = length(node), byrow = TRUE) + node)
   rowSums(dbinom(matrix(rep(y, length(node)), nrow = length(node), byrow = TRUE), 1, p2, log = TRUE))
 }</code></pre>
+<p>MFUN0-sc: 2473 s
+MFUN0: 675 s
+MFUN1: 390 s
+MFUN2: 165 s
+MFUN3: 39 s</p>
+<pre class="r"><code>if (!file.exists(&#39;data/ll_marg_brms.rds&#39;)) {
+  ll_marg_brms &lt;- mll_parallel_brms3(fit_aggression_1pl_random, MFUN3)
+
+  saveRDS(ll_marg_brms, file = &#39;data/ll_marg_brms.rds&#39;)
+} else {
+  ll_marg_brms &lt;- readRDS(&#39;data/ll_marg_brms.rds&#39;)
+}
+
+chain_brms &lt;- fit_aggression_1pl_random %&gt;% tidybayes::spread_draws(sd_person__Intercept) %&gt;% pull(.chain)
+loo_ll_marg_brms &lt;- loo(ll_marg_brms$ll, r_eff = relative_eff(ll_marg$ll, chain_brms))
+
+print(loo_ll_marg_brms)
+## 
+## Computed from 4000 by 316 log-likelihood matrix
+## 
+##          Estimate    SE
+## elpd_loo  -4057.1  63.9
+## p_loo        27.1   0.6
+## looic      8114.2 127.8
+## ------
+## Monte Carlo SE of elpd_loo is 0.1.
+## 
+## All Pareto k estimates are good (k &lt; 0.5).
+## See help(&#39;pareto-k-diagnostic&#39;) for details.
+plot(loo_ll_marg_brms)</code></pre>
+<p><img src="{{< blogdown/postref >}}index_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
 </div>
 </div>
 <div id="references" class="section level2 unnumbered">
