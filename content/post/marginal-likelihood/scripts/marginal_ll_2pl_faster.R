@@ -105,6 +105,7 @@ mll_parallel_brms_2pl_secondapproach <- function(fit, MFUN, n_nodes = 11, best_o
 
 }
 
+# 80 ms
 MFUN_2pl_secondapproach <- function(node, person, iter, data_list2, draws2, linear_terms, alphas) {
   #browser()
 
@@ -116,10 +117,18 @@ MFUN_2pl_secondapproach <- function(node, person, iter, data_list2, draws2, line
   rowSums(dbinom(matrix(rep(y, length(node)), nrow = length(node), byrow = TRUE), 1, p2, log = TRUE))
 }
 
-ll_marg_brms_2pl2 <- mll_parallel_brms_2pl_secondapproach(fit_2pl, MFUN_2pl_secondapproach)
+
+# 11 nodes gleiches Ergebnis wie 71 nodes: elpd_loo  -4057.1
+ll_marg_brms_2pl2 <- mll_parallel_brms_2pl_secondapproach(fit_2pl, MFUN_2pl_secondapproach, n_nodes = 11)
 
 chain_brms_2pl2 <- fit_2pl %>% tidybayes::spread_draws(sd_person__theta_Intercept) %>% pull(.chain)
 loo_ll_marg_brms_2pl2 <- loo(ll_marg_brms_2pl2$ll, r_eff = relative_eff(ll_marg_brms_2pl2$ll, chain_brms_2pl2))
-plot(loo_ll_marg_brms3)
 print(loo_ll_marg_brms_2pl2)
+plot(loo_ll_marg_brms_2pl2)
 loo(fit_2pl)
+
+# 5 mal schneller als der Zusammensetzende Entwurf
+
+adapt_nodes;  person = j; iter = i;
+data_list = data_list2; draws = draws2; linear_terms = linear_terms;
+alphas = alphas

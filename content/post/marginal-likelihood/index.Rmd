@@ -645,7 +645,7 @@ loo_ll_marg_brms <- loo(ll_marg_brms$ll, r_eff = relative_eff(ll_marg$ll, chain_
 print(loo_ll_marg_brms)
 plot(loo_ll_marg_brms)
 ```
-Extend this aproach on two parametric models. Works for agression data example but yields huge elpd on SPM example.
+Extend this aproach on two parametric models. Works for agression data example but yields huge elpd on SPM example. Have to increase node numer!
 
 
 ```{r, message=FALSE}

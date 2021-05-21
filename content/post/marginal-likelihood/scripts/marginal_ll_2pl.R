@@ -189,7 +189,8 @@ mll_parallel_brms5 <- function(fit, MFUN, n_nodes = 11, cores = 4) {
       # Evaluate mll with adaptive quadrature. If at n_iter + 1, evaluate
       # marginal likelihood at posterior means.
       loglik_by_node <- MFUN(adapt_nodes,  person = j, iter = i,
-                             data_list = data_list2, draws = draws2, fixefdata = fixefdata, itemparams = itemparams)
+                             data_list = data_list2, draws = draws2, fixefdata = fixefdata,
+                             itemparams = itemparams)
 
       weighted_loglik_by_node <- loglik_by_node + log_weights
       ll_j[1,j] <- matrixStats::logSumExp(weighted_loglik_by_node)
@@ -204,20 +205,26 @@ mll_parallel_brms5 <- function(fit, MFUN, n_nodes = 11, cores = 4) {
 
 }
 
+# 434 ms
 MFUN5 <- function(node, person, iter, data_list2, draws2, fixefdata, itemparams) {
   #browser()
 
-  alpha = itemparams$r_item__alpha[itemparams$.draw == iter]
+  microbenchmark::microbenchmark(t[itemparams$.draw == iter])
+
+  t <- itemparams$r_item__alpha
+
+  alpha = itemparams$r_item__alpha[itemparams$.draw == iter] # additional 100 ms
   gamma = 0
   psi = 0
 
   resp_numbers <- data_list2$resp_number[data_list2$person_number == person]
   y <- data_list2$dich[resp_numbers]
 
-  base_term <- fixefdata[iter,] %*% t(data_list2[resp_numbers, c("Intercept", "male", "anger")]) + itemparams$r_item__beta[itemparams$.draw == iter]
+  base_term <- fixefdata[iter,] %*% t(data_list2[resp_numbers, c("Intercept", "male", "anger")]) +
+    itemparams$r_item__beta[itemparams$.draw == iter] # 200 statt 1 ms
 
-  p2 <- gamma + (1-gamma-psi)*brms::inv_logit_scaled(matrix(rep(base_term, length(node)), nrow = length(node), byrow = TRUE) + node %*% t(alpha))
-  rowSums(dbinom(matrix(rep(y, length(node)), nrow = length(node), byrow = TRUE), 1, p2, log = TRUE))
+  p2 <- gamma + (1-gamma-psi)*brms::inv_logit_scaled(matrix(rep(base_term, length(node)), nrow = length(node), byrow = TRUE) + node %*% t(alpha)) # same time
+  rowSums(dbinom(matrix(rep(y, length(node)), nrow = length(node), byrow = TRUE), 1, p2, log = TRUE)) # same time
 }
 
 
